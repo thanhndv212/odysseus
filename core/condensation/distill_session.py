@@ -180,6 +180,7 @@ def get_llm_client() -> tuple[instructor.Instructor, str]:
 def distill_to_memories(
     knowledge: DistilledKnowledge,
     session_id: str,
+    directory: str | None = None,
     owner: str | None = None,
 ) -> list[MemoryEntry]:
     """Convert DistilledKnowledge to MemoryEntry list.
@@ -206,6 +207,7 @@ def distill_to_memories(
                 source="distillation",
                 timestamp=ts,
                 session_id=session_id,
+                directory=directory,
                 owner=owner,
                 pending_review=True,
                 confidence=conf,
@@ -221,6 +223,7 @@ def distill_to_memories(
                 source="distillation",
                 timestamp=ts,
                 session_id=session_id,
+                directory=directory,
                 owner=owner,
                 pending_review=True,
                 confidence=conf,
@@ -236,6 +239,7 @@ def distill_to_memories(
                 source="distillation",
                 timestamp=ts,
                 session_id=session_id,
+                directory=directory,
                 owner=owner,
                 pending_review=True,
                 confidence=conf,
@@ -251,6 +255,7 @@ def distill_to_memories(
                 source="distillation",
                 timestamp=ts,
                 session_id=session_id,
+                directory=directory,
                 owner=owner,
                 pending_review=True,
                 confidence=conf,
@@ -266,6 +271,7 @@ def distill_to_memories(
                 source="distillation",
                 timestamp=ts,
                 session_id=session_id,
+                directory=directory,
                 owner=owner,
                 pending_review=True,
                 confidence=conf,
@@ -331,7 +337,7 @@ def distill_session(
         )
 
     # Convert to memory entries
-    memories = distill_to_memories(knowledge, data.session.id, owner=owner)
+    memories = distill_to_memories(knowledge, data.session.id, directory=data.session.directory, owner=owner)
 
     # Store
     count = add_memories(memory_path, memories)

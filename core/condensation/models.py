@@ -52,6 +52,7 @@ class MemoryEntry(BaseModel):
     source: str  # "distillation" for auto-extracted
     timestamp: int  # Unix timestamp
     session_id: str | None = None
+    directory: str | None = None  # Project directory for context filtering
     owner: str | None = None
     pinned: bool = False
     uses: int = 0
