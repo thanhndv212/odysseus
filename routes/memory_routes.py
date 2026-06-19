@@ -39,6 +39,24 @@ def setup_memory_routes(memory_manager: MemoryManager, session_manager: SessionM
     """Set up memory-related routes."""
     router = APIRouter(prefix="/api/memory", tags=["memory"])
 
+    # Cache: avoid parsing 3MB memory.json on every request.
+    # Keyed by (owner, file_mtime) — invalidates when file changes.
+    _mem_cache: Dict[str, tuple[float, list]] = {}
+
+    def _cached_load(owner: str | None) -> list:
+        mem_file = os.path.join(memory_manager.data_dir, "memory.json")
+        mtime = os.path.getmtime(mem_file) if os.path.exists(mem_file) else 0
+        cache_key = owner or "__none__"
+        entry = _mem_cache.get(cache_key)
+        if entry and entry[0] == mtime:
+            return entry[1]
+        memories = memory_manager.load(owner=owner)
+        _mem_cache[cache_key] = (mtime, memories)
+        return memories
+
+    def _invalidate_cache():
+        _mem_cache.clear()
+
     def _owner(request: Request) -> Optional[str]:
         return get_current_user(request)
 
@@ -70,7 +88,7 @@ def setup_memory_routes(memory_manager: MemoryManager, session_manager: SessionM
     def debug_memory_relevance(request: Request, query: str = Form(...)):
         """Debug which memories would be triggered for a query"""
         user = _owner(request)
-        memories = memory_manager.load(owner=user)
+        memories = _cached_load(owner=user)
         relevant = memory_manager.get_relevant_memories(query, memories, threshold=0.05)
 
         return {
@@ -120,6 +138,7 @@ def setup_memory_routes(memory_manager: MemoryManager, session_manager: SessionM
         all_mem = memory_manager.load_all()
         all_mem.append(new_entry)
         memory_manager.save(all_mem)
+        _invalidate_cache()
         # Sync vector index
         if memory_vector and memory_vector.healthy:
             memory_vector.add(new_entry["id"], text)
@@ -131,16 +150,60 @@ def setup_memory_routes(memory_manager: MemoryManager, session_manager: SessionM
         return {"ok": True, "count": len([m for m in all_mem if m.get("owner") == user])}
 
     @router.get("")
-    def api_get_memory(request: Request):
-        """Return all memory entries with their metadata."""
+    def api_get_memory(
+        request: Request,
+        limit: int = 50,
+        offset: int = 0,
+        sort: str = "desc",
+    ):
+        """Return paginated memory entries with their metadata.
+
+        Query params:
+            limit: max entries per page (1-200, default 50)
+            offset: start index (default 0)
+            sort: "desc" (newest first) or "asc" (oldest first, default "desc")
+        """
         user = _owner(request)
-        return {"memory": memory_manager.load(owner=user)}
+        entries = _cached_load(owner=user)
+
+        # Sort
+        reverse = sort != "asc"
+        entries = sorted(
+            entries,
+            key=lambda m: m.get("timestamp", 0),
+            reverse=reverse,
+        )
+
+        total = len(entries)
+        if limit == 0:
+            limit = total
+        else:
+            limit = max(1, min(limit, 200))  # clamp 1-200
+        offset = max(0, offset)
+        page = entries[offset : offset + limit]
+
+        # Populate timestamp_str for each entry (same as timeline endpoint)
+        for memory in page:
+            if "timestamp" in memory:
+                try:
+                    dt = datetime.fromtimestamp(memory["timestamp"])
+                    memory["timestamp_str"] = dt.strftime("%Y-%m-%d %H:%M:%S")
+                except (ValueError, OSError, OverflowError):
+                    memory["timestamp_str"] = "Unknown"
+            else:
+                memory["timestamp_str"] = "Unknown"
+
+        return {
+            "memory": page,
+            "total": total,
+            "has_more": (offset + limit) < total,
+        }
 
     @router.post("/search")
     def search_memories(request: Request, query: str = Form(...), session_id: str = Form(None), category: str = Form(None)):
         """Search across all memories with optional filters."""
         user = _owner(request)
-        memories = memory_manager.load(owner=user)
+        memories = _cached_load(owner=user)
 
         if session_id:
             memories = [m for m in memories if m.get("session_id") == session_id]
@@ -156,7 +219,7 @@ def setup_memory_routes(memory_manager: MemoryManager, session_manager: SessionM
     def memory_timeline(request: Request):
         """Get memories in chronological order with source session information."""
         user = _owner(request)
-        memories = memory_manager.load(owner=user)
+        memories = _cached_load(owner=user)
         sorted_memories = sorted(memories, key=lambda x: x.get("timestamp", 0), reverse=True)
 
         results = []
@@ -199,7 +262,7 @@ def setup_memory_routes(memory_manager: MemoryManager, session_manager: SessionM
         except KeyError:
             raise HTTPException(404, f"Session {session_id} not found")
         _assert_session_owner(_session_obj, user)
-        memories = memory_manager.load(owner=user)
+        memories = _cached_load(owner=user)
         session_memories = [m for m in memories if m.get("session_id") == session_id]
 
         session_memories.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
@@ -494,6 +557,7 @@ def setup_memory_routes(memory_manager: MemoryManager, session_manager: SessionM
                 _verify_memory_owner(memory, user)
                 all_mem[i]["pinned"] = pinned
                 memory_manager.save(all_mem)
+                _invalidate_cache()
                 return {"ok": True, "pinned": pinned}
         raise HTTPException(404, f"Memory item {memory_id} not found")
 
@@ -502,7 +566,7 @@ def setup_memory_routes(memory_manager: MemoryManager, session_manager: SessionM
     def get_memory_item(request: Request, memory_id: str):
         """Get a specific memory item by ID."""
         user = _owner(request)
-        memories = memory_manager.load(owner=user)
+        memories = _cached_load(owner=user)
         for memory in memories:
             if memory["id"] == memory_id:
                 return {"memory": memory}
@@ -523,6 +587,7 @@ def setup_memory_routes(memory_manager: MemoryManager, session_manager: SessionM
                 all_mem[i]["timestamp"] = int(time.time())
 
                 memory_manager.save(all_mem)
+                _invalidate_cache()
                 # Sync vector index (remove old, add updated)
                 if memory_vector and memory_vector.healthy:
                     memory_vector.remove(memory_id)
@@ -545,6 +610,7 @@ def setup_memory_routes(memory_manager: MemoryManager, session_manager: SessionM
 
         all_mem = [m for m in all_mem if m["id"] != memory_id]
         memory_manager.save(all_mem)
+        _invalidate_cache()
         # Sync vector index
         if memory_vector and memory_vector.healthy:
             memory_vector.remove(memory_id)

@@ -16,6 +16,7 @@ import spinnerModule from './spinner.js';
 import { openLibrary, closeLibrary, isLibraryOpen, initLibrary } from './documentLibrary.js';
 import signatureModule from './signature.js';
 import * as Modals from './modalManager.js';
+import { ensureHljs } from './hljsLoader.js';
 
   let API_BASE = '';
   let isOpen = false;
@@ -6447,9 +6448,9 @@ import * as Modals from './modalManager.js';
     // 'svg' so the preview/run routing still treats it as renderable markup).
     const _hlLang = lang === 'svg' ? 'xml' : lang;
     codeEl.className = _hlLang ? `language-${_hlLang}` : '';
-    if (window.hljs && _hlLang) {
+    if (_hlLang) {
       codeEl.removeAttribute('data-highlighted');
-      window.hljs.highlightElement(codeEl);
+      ensureHljs().then(h => h.highlightElement(codeEl));
     }
     // Markdown post-processing: colorize standalone [brackets] and heading markers
     if (lang === 'markdown') {
@@ -6665,7 +6666,7 @@ import * as Modals from './modalManager.js';
   }
 
   function attemptAutoDetect() {
-    if (!window.hljs || !activeDocId) return;
+    if (!activeDocId) return;
     const doc = docs.get(activeDocId);
     if (!doc || doc.userSetLanguage) return;
 
@@ -6705,25 +6706,28 @@ import * as Modals from './modalManager.js';
       return;
     }
 
-    const sample = text.slice(0, AUTO_DETECT_SAMPLE_SIZE);
-    const result = window.hljs.highlightAuto(sample);
+    ensureHljs().then(hljs => {
+      if (!activeDocId) return;
+      const sample = text.slice(0, AUTO_DETECT_SAMPLE_SIZE);
+      const result = hljs.highlightAuto(sample);
 
-    if (!result.language || result.relevance < AUTO_DETECT_MIN_RELEVANCE) return;
+      if (!result.language || result.relevance < AUTO_DETECT_MIN_RELEVANCE) return;
 
-    const mapped = HLJS_TO_DROPDOWN[result.language];
-    if (!mapped) return;
+      const mapped = HLJS_TO_DROPDOWN[result.language];
+      if (!mapped) return;
 
-    const langSelect = document.getElementById('doc-language-select');
-    if (!langSelect || langSelect.value === mapped) return;
+      const langSelect = document.getElementById('doc-language-select');
+      if (!langSelect || langSelect.value === mapped) return;
 
-    langSelect.value = mapped;
-    doc.language = mapped;
-    updateLanguage();
-    syncHighlighting();
-    _syncHeaderActions();
+      langSelect.value = mapped;
+      doc.language = mapped;
+      updateLanguage();
+      syncHighlighting();
+      _syncHeaderActions();
 
-    const mdToolbar2 = document.getElementById('doc-md-toolbar');
-    if (mdToolbar2) mdToolbar2.style.display = (mapped === 'markdown') ? '' : 'none';
+      const mdToolbar2 = document.getElementById('doc-md-toolbar');
+      if (mdToolbar2) mdToolbar2.style.display = (mapped === 'markdown') ? '' : 'none';
+    });
   }
 
   // ---- Selection-based AI editing ----
@@ -8713,9 +8717,7 @@ import * as Modals from './modalManager.js';
       } else {
         preview.innerHTML = md.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g, '<br>');
       }
-      if (window.hljs) {
-        preview.querySelectorAll('pre code').forEach(b => window.hljs.highlightElement(b));
-      }
+      ensureHljs().then(h => preview.querySelectorAll('pre code').forEach(b => h.highlightElement(b)));
       if (markdownModule && markdownModule.renderMermaid) {
         markdownModule.renderMermaid(preview);
       }

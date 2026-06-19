@@ -22,7 +22,8 @@ def setup_tts_routes(tts_service):
     async def get_tts_stats():
         """Get TTS service statistics"""
         try:
-            return tts_service.get_stats()
+            svc = tts_service()  # lazy init on first call
+            return svc.get_stats()
         except Exception as e:
             logger.error(f"Failed to get TTS stats: {e}")
             raise HTTPException(status_code=500, detail=str(e))
@@ -31,14 +32,15 @@ def setup_tts_routes(tts_service):
     async def synthesize_speech(request: TTSRequest):
         """Synthesize speech from text"""
         try:
-            if not tts_service.available:
+            svc = tts_service()  # lazy init on first call
+            if not svc or not svc.available:
                 raise HTTPException(
                     status_code=503,
                     detail={"message": "TTS service not available"}
                 )
             
             if request.format == "base64":
-                audio_b64 = tts_service.synthesize_to_base64(request.text)
+                audio_b64 = svc.synthesize_to_base64(request.text)
                 if not audio_b64:
                     raise HTTPException(
                         status_code=500,
@@ -47,7 +49,7 @@ def setup_tts_routes(tts_service):
                 return {"audio": audio_b64}
             
             else:  # audio format
-                audio_data = tts_service.synthesize(request.text)
+                audio_data = svc.synthesize(request.text)
                 if not audio_data:
                     raise HTTPException(
                         status_code=500,
@@ -78,7 +80,8 @@ def setup_tts_routes(tts_service):
     async def clear_tts_cache():
         """Clear TTS cache"""
         try:
-            tts_service.clear_cache()
+            svc = tts_service()  # lazy init on first call
+            svc.clear_cache()
             return {"success": True, "message": "Cache cleared"}
         except Exception as e:
             logger.error(f"Failed to clear cache: {e}")

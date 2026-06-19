@@ -6,6 +6,7 @@ import markdownModule from '../markdown.js';
 import spinnerModule from '../spinner.js';
 import uiModule from '../ui.js';
 import presetsModule from '../presets.js';
+import { ensureHljs } from '../hljsLoader.js';
 
 var escapeHtml = uiModule.esc;
 
@@ -133,7 +134,7 @@ async function _runSynthForPane(modelToUse, synthPrompt, synthBody, spinner, his
     }
 
     // Final highlight
-    if (window.hljs) synthBody.querySelectorAll('pre code:not(.hljs)').forEach(b => window.hljs.highlightElement(b));
+    ensureHljs().then(h => synthBody.querySelectorAll('pre code:not(.hljs)').forEach(b => h.highlightElement(b)));
 
     // Cleanup temp session
     fetch(`${state.API_BASE}/api/session/${createData.id}`, { method: 'DELETE' }).catch(() => {});
@@ -329,7 +330,7 @@ async function streamToPane(paneIdx, sessionId, message, aiMsgEl, opts) {
               if (markdownModule) {
                 aiMsgEl._textEl.innerHTML = markdownModule.processWithThinking(
                   markdownModule.squashOutsideCode(accumulated));
-                if (window.hljs) aiMsgEl._textEl.querySelectorAll('pre code:not(.hljs)').forEach(b => window.hljs.highlightElement(b));
+                ensureHljs().then(h => aiMsgEl._textEl.querySelectorAll('pre code:not(.hljs)').forEach(b => h.highlightElement(b)));
               }
             }
             // Destroy spinner if still present
@@ -469,9 +470,7 @@ async function streamToPane(paneIdx, sessionId, message, aiMsgEl, opts) {
         markdownModule.squashOutsideCode(accumulated)
       );
     }
-    if (window.hljs) {
-      finalTarget.querySelectorAll('pre code:not(.hljs)').forEach(b => window.hljs.highlightElement(b));
-    }
+    ensureHljs().then(h => finalTarget.querySelectorAll('pre code:not(.hljs)').forEach(b => h.highlightElement(b)));
 
     // ── Show play button if response contains HTML ──
     if (_autoPreviewHtml) _autoPreviewHtml(paneIdx, accumulated);

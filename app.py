@@ -528,11 +528,20 @@ chat_handler      = components["chat_handler"]
 model_discovery   = components["model_discovery"]
 skills_manager    = components["skills_manager"]
 
-# TTS
-from services.tts import get_tts_service
+# TTS (lazy init — most users never use speech)
+from services.tts import get_tts_service as _get_tts_service
 
-tts_service = get_tts_service()
-logger.info("TTS service initialized (provider managed via admin settings)")
+_tts_service = None
+
+def ensure_tts():
+    """Lazy-initialize TTS on first use. Most users never need speech."""
+    global _tts_service
+    if _tts_service is not None:
+        return _tts_service
+    _tts_service = _get_tts_service()
+    if _tts_service is not None:
+        logger.info("TTS service initialized (provider managed via admin settings)")
+    return _tts_service
 
 # ========= EXCEPTION HANDLERS =========
 @app.exception_handler(SessionNotFoundError)
@@ -645,14 +654,25 @@ app.include_router(setup_chatgpt_subscription_routes())
 
 # TTS
 from routes.tts_routes import setup_tts_routes
-app.include_router(setup_tts_routes(tts_service))
+app.include_router(setup_tts_routes(ensure_tts))
 
-# STT
-from services.stt import get_stt_service
-stt_service = get_stt_service()
+# STT (lazy init — most users never use speech)
+from services.stt import get_stt_service as _get_stt_service
+
+_stt_service = None
+
+def ensure_stt():
+    """Lazy-initialize STT on first use. Most users never need speech."""
+    global _stt_service
+    if _stt_service is not None:
+        return _stt_service
+    _stt_service = _get_stt_service()
+    if _stt_service is not None:
+        logger.info("STT service initialized (provider managed via settings)")
+    return _stt_service
+
 from routes.stt_routes import setup_stt_routes
-app.include_router(setup_stt_routes(stt_service))
-logger.info("STT service initialized (provider managed via settings)")
+app.include_router(setup_stt_routes(ensure_stt))
 
 # Documents (artifacts/canvas)
 from routes.document_routes import setup_document_routes
@@ -925,6 +945,20 @@ async def _startup_event():
             _db.close()
     except Exception as e:
         logger.debug(f"Incognito purge skipped: {e}")
+    # Run SQLite PRAGMA optimize at startup to update query planner statistics.
+    # This is fast (<100ms for a 3MB DB) and improves query performance.
+    try:
+        from core.database import SessionLocal as _SLopt
+        from sqlalchemy import text as _text_opt
+        _db_opt = _SLopt()
+        try:
+            _db_opt.execute(_text_opt("PRAGMA optimize"))
+            _db_opt.commit()
+            logger.info("SQLite PRAGMA optimize executed")
+        finally:
+            _db_opt.close()
+    except Exception as e:
+        logger.debug(f"PRAGMA optimize skipped: {e}")
     # Strong refs to fire-and-forget startup tasks. Without this, Python may
     # GC tasks created with `asyncio.create_task(...)` before they finish.
     _startup_tasks: list[asyncio.Task] = getattr(app.state, "_startup_tasks", [])
@@ -1145,6 +1179,19 @@ async def _startup_event():
 
 async def _shutdown_event():
     logger.info("Application shutting down...")
+    # VACUUM reclaims disk space from deleted rows and defragments the DB.
+    # Runs on clean shutdown only (not on crash). For a 3MB DB, takes <1s.
+    try:
+        from core.database import SessionLocal as _SLvac
+        from sqlalchemy import text as _text_vac
+        _db_vac = _SLvac()
+        try:
+            _db_vac.execute(_text_vac("VACUUM"))
+            logger.info("SQLite VACUUM executed")
+        finally:
+            _db_vac.close()
+    except Exception as e:
+        logger.debug(f"VACUUM skipped: {e}")
     if upload_cleanup_task:
         upload_cleanup_task.cancel()
         try:

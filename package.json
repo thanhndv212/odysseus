@@ -1,9 +1,16 @@
 {
+  "scripts": {
+    "build:js": "esbuild static/app.js --bundle --format=esm --splitting --outdir=static/dist/ --minify --legal-comments=none"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/pewdiepie-archdaemon/odysseus.git"
   },
   "devDependencies": {
-    "@antithesishq/bombadil": "^0.6.1"
+    "@antithesishq/bombadil": "^0.6.1",
+    "cssnano": "^8.0.2",
+    "esbuild": "^0.28.1",
+    "postcss": "^8.5.15",
+    "postcss-cli": "^11.0.1"
   }
 }

@@ -1,0 +1,1 @@
+var a=/Mac|iPhone|iPad/.test(typeof navigator<"u"&&navigator.platform||"")||/Mac/.test(typeof navigator<"u"&&navigator.userAgent||"");function n(t,e=a){return!e&&!!t.ctrlKey&&!!t.altKey&&!!(t.getModifierState&&t.getModifierState("AltGraph"))}export{a,n as b};

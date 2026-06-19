@@ -10,6 +10,8 @@ import { initModelPicker, updateModelPicker } from './modelPicker.js';
 import themeModule from './theme.js';
 import spinnerModule from './spinner.js';
 
+import { ensureHljs } from './hljsLoader.js';
+
 const API_BASE = window.location.origin;
 
 let sessions = [];
@@ -1678,11 +1680,7 @@ export async function selectSession(id, { keepSidebar = false } = {}) {
       chatHistory.style.opacity = '1';
       chatHistory.classList.remove('no-animate');
     }
-    if (window.hljs) {
-      document.querySelectorAll('pre code:not(.hljs)').forEach(block => {
-        window.hljs.highlightElement(block);
-      });
-    }
+    ensureHljs().then(h => document.querySelectorAll('pre code:not(.hljs)').forEach(b => h.highlightElement(b)));
     // Hide research button on session switch — it's only for the session that started it
     var _rBtn = document.getElementById('research-toggle-btn');
     var _rChk = document.getElementById('research-toggle');

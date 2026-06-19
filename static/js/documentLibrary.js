@@ -11,6 +11,7 @@ import markdownModule from './markdown.js';
 import { makeWindowDraggable } from './windowDrag.js';
 import { langIcon } from './langIcons.js';
 import { registerMenuDismiss, dismissOrRemove } from './escMenuStack.js';
+import { ensureHljs } from './hljsLoader.js';
 
 // ── Injected references from documentModule ──
 let API_BASE = '';
@@ -775,8 +776,8 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     const pre = document.createElement('pre');
     const code = document.createElement('code');
     try {
-      if (doc.language && doc.language !== 'text' && window.hljs && !_librarySearch) {
-        code.innerHTML = window.hljs.highlight(doc.preview || '', { language: doc.language }).value;
+      if (doc.language && doc.language !== 'text' && !_librarySearch) {
+        ensureHljs().then(h => { code.innerHTML = h.highlight(doc.preview || '', { language: doc.language }).value; });
       } else if (_librarySearch) {
         // While searching, highlight matched terms in the preview (plain
         // text) rather than syntax-highlighting — the match is what matters.
@@ -954,8 +955,8 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
       // highlighting anyway, so skip it there.
       const HL_CAP = 20000;
       try {
-        if (lang && lang !== 'text' && lang !== 'markdown' && window.hljs && content.length <= HL_CAP) {
-          code.innerHTML = window.hljs.highlight(content, { language: lang }).value;
+        if (lang && lang !== 'text' && lang !== 'markdown' && content.length <= HL_CAP) {
+          ensureHljs().then(h => { code.innerHTML = h.highlight(content, { language: lang }).value; });
         } else {
           code.textContent = content;
         }

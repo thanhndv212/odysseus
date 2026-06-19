@@ -9,6 +9,7 @@ import { providerLogo } from './providers.js';
 import { PROMPT_TEMPLATES, getAllPresets } from './presets.js';
 import { sortModelObjects } from './modelSort.js';
 import Storage from './storage.js';
+import { ensureHljs } from './hljsLoader.js';
 
 let API_BASE = '';
 let _active = false;
@@ -890,7 +891,7 @@ async function _streamToHolder(modelIdx, sessionId, msg, holderEl, abortCtrl) {
     bodyEl.innerHTML = markdownModule.processWithThinking(
       markdownModule.squashOutsideCode(accumulated)
     );
-    if (window.hljs) holderEl.querySelectorAll('pre code').forEach(b => window.hljs.highlightElement(b));
+    ensureHljs().then(h => holderEl.querySelectorAll('pre code').forEach(b => h.highlightElement(b)));
     if (markdownModule.renderMermaid) markdownModule.renderMermaid(holderEl);
     holderEl.appendChild(chatRenderer.createMsgFooter(holderEl));
   } else if (!bodyEl.querySelector('.agent-tool-event') && !bodyEl.querySelector('img')) {

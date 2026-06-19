@@ -27,6 +27,7 @@ import calendarModule from './js/calendar.js';
 import notesModule from './js/notes.js';
 import adminModule from './js/admin.js';
 import settingsModule from './js/settings.js';
+import { ensureHljs } from './js/hljsLoader.js';
 // Eagerly bind unified minimize/restore behavior across all tool modals.
 import './js/modalManager.js';
 // Desktop window tiling — drag a modal near an edge/corner to snap.
@@ -4071,12 +4072,9 @@ function startOdysseusApp() {
   
 
 
-  if (window.hljs) {
-    console.log('Highlighting all code blocks on page load');
-    document.querySelectorAll('pre code:not(.hljs)').forEach(block => {
-      window.hljs.highlightElement(block);
-    });
-  }
+  ensureHljs().then(h => {
+    document.querySelectorAll('pre code:not(.hljs)').forEach(b => h.highlightElement(b));
+  });
 }
 
 if (document.readyState === 'loading') {

@@ -24,6 +24,7 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
 import createResearchSynapse from './researchSynapse.js';
 import { createStreamRenderer } from './streamingRenderer.js';
 import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composerArrowUpRecall.js';
+import { ensureHljs } from './hljsLoader.js';
 
   const RESEARCH_TIMEOUT_MS = 360000;
   const DEFAULT_TIMEOUT_MS = 120000;
@@ -356,11 +357,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
         );
         
         // Highlight code blocks
-        if (window.hljs) {
-          currentHolder.querySelectorAll('pre code').forEach((block) => {
-            window.hljs.highlightElement(block);
-          });
-        }
+        ensureHljs().then(h => currentHolder.querySelectorAll('pre code').forEach(b => h.highlightElement(b)));
         
         // Add the stopped indicator with continue button
         const stoppedIndicator = document.createElement('div');
@@ -1233,7 +1230,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
             const r = liveReply._streamRenderer ||
               (liveReply._streamRenderer = createStreamRenderer(liveReply, {
                 render: (t) => markdownModule.mdToHtml(markdownModule.squashOutsideCode(t)),
-                hljs: window.hljs,
+                hljs: null,
               }));
             r.update(replyTrimmed);
           }
@@ -1269,7 +1266,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
         const renderer = contentEl._streamRenderer ||
           (contentEl._streamRenderer = createStreamRenderer(contentEl, {
             render: (t) => markdownModule.processWithThinking(markdownModule.squashOutsideCode(t)),
-            hljs: window.hljs,
+            hljs: null,
           }));
         renderer.update(dt);
         uiModule.scrollHistory();
@@ -2043,7 +2040,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                     var _contentEl3 = _ensureStreamLayout(_body3);
                     _contentEl3.style.minHeight = '';  // clear streaming inflate
                     _contentEl3.innerHTML = markdownModule.processWithThinking(markdownModule.squashOutsideCode(dt));
-                    if (window.hljs) roundHolder.querySelectorAll('pre code').forEach((b) => window.hljs.highlightElement(b));
+                    ensureHljs().then(h => roundHolder.querySelectorAll('pre code').forEach(b => h.highlightElement(b)));
                   } else {
                     roundHolder.style.display = 'none';
                   }
@@ -2726,11 +2723,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
         }
 
 
-        if (window.hljs) {
-          roundHolder.querySelectorAll('pre code').forEach((block) => {
-            window.hljs.highlightElement(block);
-          });
-        }
+        ensureHljs().then(h => roundHolder.querySelectorAll('pre code').forEach(b => h.highlightElement(b)));
         if (markdownModule.renderMermaid) markdownModule.renderMermaid(roundHolder);
 
         uiModule.scrollHistory();
@@ -2826,9 +2819,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
             const oldFooter = prevEl.querySelector('.msg-footer');
             if (oldFooter) oldFooter.remove();
             prevEl.appendChild(createMsgFooter(prevEl));
-            if (window.hljs) {
-              prevEl.querySelectorAll('pre code').forEach(block => window.hljs.highlightElement(block));
-            }
+            ensureHljs().then(h => prevEl.querySelectorAll('pre code').forEach(b => h.highlightElement(b)));
 
             // Persist merge to server
             const sid = sessionModule.getCurrentSessionId();
@@ -2941,11 +2932,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
               markdownModule.squashOutsideCode(accumulated)
             );
 
-            if (window.hljs) {
-              holder.querySelectorAll('pre code').forEach((block) => {
-                window.hljs.highlightElement(block);
-              });
-            }
+            ensureHljs().then(h => holder.querySelectorAll('pre code').forEach(b => h.highlightElement(b)));
 
             const stoppedIndicator = document.createElement('div');
             stoppedIndicator.className = 'stopped-indicator';
@@ -4210,9 +4197,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
     if (body) body.innerHTML = v.html;
     msgElement.dataset.raw = v.raw;
     msgElement.dataset.variantIndex = String(newIdx);
-    if (window.hljs) {
-      msgElement.querySelectorAll('pre code').forEach(block => window.hljs.highlightElement(block));
-    }
+    ensureHljs().then(h => msgElement.querySelectorAll('pre code').forEach(b => h.highlightElement(b)));
     _renderVariantNav(msgElement, variants, newIdx);
 
     // Persist selected variant to server
@@ -4308,7 +4293,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
               _wrap.appendChild(chatRenderer.createMsgFooter(_wrap));
               _appendViewReportLink(_wrap, sessionId);
               _box.appendChild(_wrap);
-              if (window.hljs) _wrap.querySelectorAll('pre code').forEach(function(b) { window.hljs.highlightElement(b); });
+              ensureHljs().then(h => _wrap.querySelectorAll('pre code').forEach(b => h.highlightElement(b)));
               uiModule.scrollHistory();
             }
           }
@@ -4459,9 +4444,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                   ) + findingsHtml;
                   holder.dataset.raw = rData.result;
                   _appendViewReportLink(holder, sessionId);
-                  if (window.hljs) {
-                    holder.querySelectorAll('pre code').forEach(b => window.hljs.highlightElement(b));
-                  }
+                  ensureHljs().then(h => holder.querySelectorAll('pre code').forEach(b => h.highlightElement(b)));
                 }
               }
             } else {

@@ -20,6 +20,12 @@ let _renderedFiltered = [];
 let _sentinelObserver = null;
 let _scrollLoadingMore = false;
 
+// Server-side pagination state
+const PAGE_LIMIT = 50;
+let memoryOffset = 0;
+let memoryTotal = 0;
+let memoryHasMore = false;
+
 // Single delegated outside-click handler — replaces the per-item document
 // listener that leaked ~N listeners every render. One listener total.
 if (!window._memDropdownCloseWired) {
@@ -380,30 +386,28 @@ async function syncPrefToggle(elementId, prefKey, onMsg, offMsg, dimBelow = true
   }
 }
 
+async function loadMemoryPage(append = false) {
+  const url = `${window.location.origin}/api/memory?limit=${PAGE_LIMIT}&offset=${memoryOffset}&sort=desc`;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error('Failed to fetch memory page');
+  const data = await response.json();
+  memoryTotal = data.total;
+  memoryHasMore = data.has_more;
+  if (append) {
+    memories = memories.concat(data.memory);
+  } else {
+    memories = data.memory;
+    memoryOffset = 0;
+  }
+  buildCategoryChips();
+  return data.memory;
+}
+
 export async function loadMemories() {
   _ensureNewMemoryCategorySelect();
   try {
-    const response = await fetch(`${window.location.origin}/api/memory`);
-
-    if (!response.ok) {
-      console.error('Memory fetch failed with status:', response.status);
-      memories = [];
-      buildCategoryChips();
-      renderMemoryList();
-      updateMemoryCount();
-      syncToggles();
-      return;
-    }
-
-    const data = await response.json();
-
-    if (data && data.memory) {
-      memories = data.memory;
-    } else if (Array.isArray(data)) {
-      memories = data;
-    } else {
-      memories = [];
-    }
+    const page = await loadMemoryPage(false);
+    memoryOffset = PAGE_LIMIT;
 
     buildCategoryChips();
     renderMemoryList();
@@ -411,6 +415,8 @@ export async function loadMemories() {
   } catch (error) {
     console.error('Failed to load memories:', error);
     memories = [];
+    memoryTotal = 0;
+    memoryHasMore = false;
     buildCategoryChips();
     renderMemoryList();
     updateMemoryCount();
@@ -544,8 +550,8 @@ export async function tidyMemories() {
       return;
     }
 
-    // Fetch the new state
-    const freshRes = await fetch(`${window.location.origin}/api/memory`);
+    // Fetch the new state (limit=0 returns all entries)
+    const freshRes = await fetch(`${window.location.origin}/api/memory?limit=0`);
     const freshData = await freshRes.json();
     const afterList = freshData.memory || freshData || [];
     const afterMap = new Map(afterList.map(m => [m.id, m]));
@@ -722,7 +728,7 @@ export function renderMemoryList() {
         document.querySelector('.memory-tab[data-memory-tab="add"]')?.click();
       });
     }
-    updateMemoryCount(filtered.length, memories.length);
+    updateMemoryCount(filtered.length, memoryTotal || memories.length);
     return;
   }
 
@@ -996,7 +1002,27 @@ export function renderMemoryList() {
     _sentinelObserver.observe(sentinel);
   }
 
-  updateMemoryCount(filtered.length, memories.length);
+  // Server-side load more — when we've rendered everything we have but the
+  // server has more pages, fetch the next page.
+  if (memoryHasMore && filtered.length <= _renderLimit) {
+    const serverSentinel = document.createElement('div');
+    serverSentinel.className = 'memory-load-more-sentinel';
+    serverSentinel.style.cssText = 'padding:14px;text-align:center;opacity:0.6;font-size:12px;';
+    serverSentinel.textContent = 'Loading more…';
+    memoryList.appendChild(serverSentinel);
+    const serverObserver = new IntersectionObserver(async (entries) => {
+      if (entries.some(e => e.isIntersecting)) {
+        serverObserver.disconnect();
+        await loadMemoryPage(true);
+        memoryOffset += PAGE_LIMIT;
+        // Re-render now that we have more data loaded
+        renderMemoryList();
+      }
+    }, { root: memoryList.parentElement, rootMargin: '300px' });
+    serverObserver.observe(serverSentinel);
+  }
+
+  updateMemoryCount(filtered.length, memoryTotal || memories.length);
 }
 
 // ---- Inline edit with category picker ----
