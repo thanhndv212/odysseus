@@ -4,11 +4,14 @@ import math
 import re
 import time
 from collections import Counter
+from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 from src.chat_helpers import extract_urls
 from src.youtube_handler import is_youtube_url
 from src.search import comprehensive_web_search, fetch_webpage_content
 from src.prompt_security import UNTRUSTED_CONTEXT_POLICY, untrusted_context_message
+from src.constants import DATA_DIR
+from core.condensation.context_assembly import assemble_context
 
 logger = logging.getLogger(__name__)
 
@@ -47,9 +50,43 @@ class ChatProcessor:
         self.personal_docs_manager = personal_docs_manager
         self.memory_vector = memory_vector
         self.skills_manager = skills_manager
+        # Brain context brief cache (avoids re-reading 3MB memory.json every
+        # message). Refreshed every 5 minutes or on first call.
+        self._brain_context_cache: Optional[str] = None
+        self._brain_context_ts: float = 0.0
 
     # Minimum similarity score for RAG results to be injected
     RAG_SIMILARITY_THRESHOLD = 0.35
+    # Brain context cache TTL in seconds
+    BRAIN_CONTEXT_TTL = 300
+
+    def _get_brain_context(self) -> str:
+        """Return cached brain context brief, refreshing if stale.
+
+        Reads the session-knowledge memory.json (symlinked into DATA_DIR)
+        and assembles a ~2K-token brief of preferences, instructions, facts,
+        learnings, and open tasks. Cached for BRAIN_CONTEXT_TTL seconds.
+        """
+        now = time.time()
+        if (self._brain_context_cache is not None
+                and (now - self._brain_context_ts) < self.BRAIN_CONTEXT_TTL):
+            return self._brain_context_cache
+        try:
+            memory_path = str(Path(DATA_DIR) / "memory.json")
+            log_path = str(Path(DATA_DIR) / "distillation_log.json")
+            brief = assemble_context(
+                memory_path=memory_path,
+                project_dir=None,
+                log_path=log_path,
+            )
+            # Don't cache empty/degraded briefs — retry next call
+            if brief and "No memories" not in brief:
+                self._brain_context_cache = brief
+                self._brain_context_ts = now
+            return brief
+        except Exception as e:
+            logger.warning("Brain context assembly failed: %s", e)
+            return ""
 
     def _hybrid_retrieve(self, message: str, mem_entries: list, k: int = 5) -> list:
         """Retrieve memories relevant to the message.
@@ -248,6 +285,17 @@ class ChatProcessor:
 
             # (skills index injection moved out — see below; only fires in
             # agent mode so chat mode and incognito stay clean.)
+
+            # Brain context — session-knowledge distilled brief (preferences,
+            # instructions, facts, learnings, open tasks). Complementary to the
+            # ChromaDB memory above: that's interactive user-saved memories,
+            # this is the auto-distilled coding-session knowledge base.
+            brain_brief = self._get_brain_context()
+            if brain_brief:
+                preface.append(untrusted_context_message(
+                    "brain context: distilled session knowledge",
+                    brain_brief,
+                ))
 
         # RAG: search if enabled and rag_manager available, inject only above threshold
         if use_rag:
