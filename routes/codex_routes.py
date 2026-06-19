@@ -866,3 +866,32 @@ def setup_claude_routes() -> APIRouter:
         return StreamingResponse(buf, media_type="application/zip", headers=headers)
 
     return router
+
+
+def setup_opencode_routes() -> APIRouter:
+    """Serve the OpenCode skill + plugin bundle.
+
+    OpenCode uses the same scope-gated `/api/codex/*` endpoints at runtime;
+    this router delivers the skill zip via `/api/opencode/plugin.zip` so the
+    user-facing setup commands stay in the OpenCode namespace.
+    """
+    router = APIRouter(prefix="/api/opencode", tags=["opencode"])
+
+    @router.get("/plugin.zip")
+    def plugin_zip(request: Request):
+        require_authenticated_request(request)
+        root = Path(__file__).resolve().parent.parent / "integrations" / "opencode"
+        if not root.exists():
+            raise HTTPException(404, "OpenCode plugin bundle not found")
+        buf = BytesIO()
+        with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for path in sorted(root.rglob("*")):
+                if path.is_dir() or "__pycache__" in path.parts or path.suffix == ".pyc":
+                    continue
+                # Ship the full bundle: skills/ + scripts/ + plugins/
+                zf.write(path, path.relative_to(root))
+        buf.seek(0)
+        headers = {"Content-Disposition": 'attachment; filename="odysseus-opencode-plugin.zip"'}
+        return StreamingResponse(buf, media_type="application/zip", headers=headers)
+
+    return router
