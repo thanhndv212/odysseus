@@ -28,7 +28,7 @@ Usage:
 
 Options:
   --limit N       Max sessions to distill in one run (default 5)
-  --traces-dir    CSF traces directory (default ~/copilot-trace-data/traces)
+  --traces-dir    CSF traces directory (default ~/session-trace-data/traces)
   --memory-path   Path to memory.json (default odysseus/data/memory.json)
   --log-path      Path to distillation log (default odysseus/data/distillation_log.json)
 """
@@ -66,7 +66,7 @@ def main() -> int:
     parser.add_argument("--mock", action="store_true", help="Use mock LLM (no API call)")
     parser.add_argument("--dry-run", action="store_true", help="Show what would be distilled without calling LLM")
     parser.add_argument("--limit", type=int, default=5, help="Max sessions to distill (default 5)")
-    parser.add_argument("--traces-dir", default=os.path.expanduser("~/copilot-trace-data/traces"))
+    parser.add_argument("--traces-dir", default=os.path.expanduser("~/session-trace-data/traces"))
     parser.add_argument("--memory-path", default=None)
     parser.add_argument("--log-path", default=None)
     parser.add_argument("--review", action="store_true", help="Show memories pending review")
