@@ -783,6 +783,10 @@ app.include_router(setup_opencode_routes())
 from routes.vault_routes import setup_vault_routes
 app.include_router(setup_vault_routes())
 
+# Memory → Obsidian Notes sync
+from routes.memory_to_notes_routes import setup_memory_to_notes_routes
+app.include_router(setup_memory_to_notes_routes())
+
 # Contacts (CardDAV)
 from routes.contacts_routes import setup_contacts_routes
 app.include_router(setup_contacts_routes())

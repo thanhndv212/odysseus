@@ -1454,6 +1454,9 @@ document.addEventListener('DOMContentLoaded', () => {
       if (target === 'skills') {
         import('./skills.js').then(m => { if (m.loadSkills) m.loadSkills(true); else if (m.default?.loadSkills) m.default.loadSkills(true); });
       }
+      if (target === 'notes') {
+        import('./memoryToNotes.js').then(m => { if (m.initNotesTab) m.initNotesTab(); else if (m.default?.initNotesTab) m.default.initNotesTab(); });
+      }
     });
   });
 

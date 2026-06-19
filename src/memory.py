@@ -212,7 +212,7 @@ class MemoryManager:
             json.dump(entries, f, ensure_ascii=False, indent=2)
         os.replace(tmp_file, self.memory_file)
     
-    def add_entry(self, text: str, source: str = "user", category: str = "fact", owner: str = None) -> Dict:
+    def add_entry(self, text: str, source: str = "user", category: str = "fact", owner: str = None, directory: str = None) -> Dict:
         """Add a new memory entry."""
         if not text.strip():
             raise ValueError("Memory text cannot be empty")
@@ -227,6 +227,8 @@ class MemoryManager:
         }
         if owner:
             entry["owner"] = owner
+        if directory:
+            entry["directory"] = directory
         return entry
 
     def increment_uses(self, ids: List[str]) -> None:

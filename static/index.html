@@ -253,6 +253,7 @@
           <button class="memory-tab" data-memory-tab="skills"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>Skills <span id="skills-count" class="memory-count" style="font-size:0.8em;opacity:0.6;font-weight:normal;margin-left:4px">0</span></button>
           <button class="memory-tab" data-memory-tab="add"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>Add</button>
           <button class="memory-tab" data-memory-tab="settings"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Settings</button>
+          <button class="memory-tab" data-memory-tab="notes"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>Notes
         </div>
         <!-- ── Browse tab ── -->
         <div class="memory-tab-panel" data-memory-panel="browse">
@@ -445,6 +446,36 @@
           </div>
         </div>
       </div>
+        <!-- ── Notes Sync tab ── -->
+        <div class="memory-tab-panel hidden" data-memory-panel="notes">
+          <div class="admin-card" style="display:flex;flex-direction:column;overflow:hidden;flex:1;min-height:0;">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px;">
+              <h2 style="margin:0;padding:0;line-height:1;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:6px;color:var(--accent, var(--red));"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>Notes Sync</h2>
+            </div>
+            <p class="memory-desc doclib-desc" style="margin-top:6px;">Sync memory entries to Obsidian project notes with live SSE progress.</p>
+            <!-- Status bar -->
+            <div id="notes-sync-status" class="notes-sync-status">Loading status…</div>
+            <!-- Buttons -->
+            <div class="notes-sync-toolbar" style="display:flex;gap:6px;margin:8px 0;flex-wrap:wrap;">
+              <button id="notes-sync-run" class="memory-toolbar-btn" title="Incremental: process new entries only">🔄 Run Now</button>
+              <button id="notes-sync-dry-run" class="memory-toolbar-btn" title="Preview what would be written without changing files">🔍 Dry Run</button>
+              <button id="notes-sync-full" class="memory-toolbar-btn" title="Rebuild all project notes from scratch">🔃 Full Rebuild</button>
+            </div>
+            <!-- Progress bar -->
+            <div id="notes-sync-progress-wrap" class="notes-sync-progress-wrap" style="display:none;">
+              <div class="notes-sync-progress-track">
+                <div id="notes-sync-progress-bar" class="notes-sync-progress-fill" style="width:0%"></div>
+              </div>
+              <span id="notes-sync-progress-text" class="notes-sync-progress-text">0 / 0 (0%)</span>
+            </div>
+            <!-- Log window -->
+            <div id="notes-sync-log" class="notes-sync-log" style="flex:1;min-height:0;overflow-y:auto;background:var(--bg-secondary,var(--panel));border:1px solid var(--border);border-radius:8px;padding:8px;margin:8px 0;font-family:var(--mono,monospace);font-size:11px;line-height:1.5;"></div>
+            <!-- Project breakdown -->
+            <div style="font-size:11px;font-weight:600;margin:4px 0 2px;opacity:0.7;">Projects</div>
+            <div id="notes-sync-projects" class="notes-sync-projects"></div>
+          </div>
+        </div>
+
     </div>
   </div>
 
@@ -2428,6 +2459,7 @@
 <script type="module" src="/static/js/dragSort.js"></script>
 <script type="module" src="/static/js/sessions.js"></script>
 <script type="module" src="/static/js/memory.js"></script>
+  <script type="module" src="/static/js/memoryToNotes.js"></script>
 <script type="module" src="/static/js/skills.js"></script>
 <script type="module" src="/static/js/tourHints.js"></script>
 <script type="module" src="/static/js/tourAutoplay.js"></script>

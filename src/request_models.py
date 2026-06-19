@@ -38,6 +38,7 @@ class MemoryAddRequest(BaseModel):
     category: str = Field(default="fact", description="Memory category")
     source: str = Field(default="user", description="Memory source")
     session_id: Optional[str] = Field(default=None, description="Associated session ID")
+    directory: Optional[str] = Field(default=None, description="Project directory for context filtering")
 
     @field_validator('category')
     @classmethod
@@ -134,3 +135,4 @@ class MemoryResponse(BaseModel):
     source: str = Field(..., description="Memory source")
     timestamp: int = Field(..., description="Unix timestamp")
     session_id: Optional[str] = Field(default=None, description="Associated session")
+    directory: Optional[str] = Field(default=None, description="Project directory")

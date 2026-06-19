@@ -37673,3 +37673,117 @@ body.theme-frosted .modal {
 .log-line-default {
   color: var(--fg, #9cdef2);
 }
+
+/* ── Notes Sync tab (Brain modal) ─────────────────────────────────────────── */
+
+.notes-sync-status {
+  font-size: 11px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--bg-secondary, var(--panel));
+  border: 1px solid var(--border);
+  color: var(--fg);
+  opacity: 0.85;
+  line-height: 1.5;
+  margin-bottom: 2px;
+}
+
+.notes-sync-progress-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+}
+
+.notes-sync-progress-track {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-secondary, var(--panel));
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.notes-sync-progress-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent, #ff6b6b);
+  transition: width 0.3s ease;
+}
+
+.notes-sync-progress-text {
+  font-size: 10px;
+  font-family: var(--mono, monospace);
+  color: var(--fg);
+  opacity: 0.6;
+  white-space: nowrap;
+  min-width: 120px;
+  text-align: right;
+}
+
+.notes-sync-log {
+  font-family: var(--mono, 'SF Mono', 'Fira Code', monospace);
+}
+
+.notes-sync-log .log-timestamp {
+  color: var(--color-muted, #666);
+  margin-right: 6px;
+  font-size: 10px;
+}
+
+.notes-sync-projects {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.notes-project-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.notes-project-name {
+  width: 140px;
+  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+  opacity: 0.85;
+}
+
+.notes-project-bar-wrap {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-secondary, var(--panel));
+  overflow: hidden;
+}
+
+.notes-project-bar {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent, #ff6b6b);
+  opacity: 0.6;
+  transition: width 0.5s ease;
+}
+
+.notes-project-count {
+  width: 50px;
+  text-align: right;
+  font-family: var(--mono, monospace);
+  font-size: 10px;
+  color: var(--fg);
+  opacity: 0.6;
+}
+
+.notes-sync-empty {
+  font-size: 11px;
+  color: var(--color-muted, #888);
+  font-style: italic;
+  padding: 8px 0;
+}

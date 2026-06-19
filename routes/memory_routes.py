@@ -95,7 +95,8 @@ def setup_memory_routes(memory_manager: MemoryManager, session_manager: SessionM
                 text=form.get("text"),
                 category=form.get("category", "fact"),
                 source=form.get("source", "user"),
-                session_id=form.get("session_id")
+                session_id=form.get("session_id"),
+                directory=form.get("directory"),
             )
 
         user = _owner(request)
@@ -113,7 +114,7 @@ def setup_memory_routes(memory_manager: MemoryManager, session_manager: SessionM
                 raise HTTPException(404, "Session not found")
             _assert_session_owner(session_obj, user)
 
-        new_entry = memory_manager.add_entry(text, memory_data.source, memory_data.category, owner=user)
+        new_entry = memory_manager.add_entry(text, memory_data.source, memory_data.category, owner=user, directory=memory_data.directory)
         if memory_data.session_id:
             new_entry["session_id"] = memory_data.session_id
         all_mem = memory_manager.load_all()

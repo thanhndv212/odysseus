@@ -92,6 +92,9 @@ scripts/compound/*.json
 research_data/
 **/search_analytics.json
 
+# Memory-to-notes sync state (runtime tracking, not source)
+scripts/ingest/.memory_to_notes_tracking.json
+
 # Internal dev/review notes — not for public repo
 dev-docs/
 # Windows-port working docs (local only, not for public repo)

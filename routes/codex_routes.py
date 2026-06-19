@@ -381,6 +381,7 @@ def setup_codex_routes(
                 category=body.get("category", "fact"),
                 source=body.get("source", "user"),
                 session_id=body.get("session_id"),
+                directory=body.get("directory"),
             )
         except Exception as exc:
             raise HTTPException(400, f"Invalid memory payload: {exc}")
