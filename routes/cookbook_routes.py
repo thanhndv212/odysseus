@@ -21,7 +21,6 @@ from pydantic import BaseModel
 from core.middleware import require_admin
 from routes._validators import validate_remote_host, validate_ssh_port
 from core.platform_compat import (
-    IS_WINDOWS,
     detached_popen_kwargs,
     find_bash,
     kill_process_tree,
@@ -258,10 +257,9 @@ def setup_cookbook_routes() -> APIRouter:
         # The Docker image keeps cookbook keys under /app/.ssh; that path only
         # exists inside the container. On Windows (and any non-container host)
         # fall back to the user profile's ~/.ssh, which OpenSSH on Win10+ uses.
-        if not IS_WINDOWS:
-            app_ssh = Path("/app/.ssh")
-            if Path("/app").exists():
-                return app_ssh
+        app_ssh = Path("/app/.ssh")
+        if Path("/app").exists():
+            return app_ssh
         return Path.home() / ".ssh"
 
     def _cookbook_ssh_key_path() -> Path:
@@ -496,89 +494,16 @@ def setup_cookbook_routes() -> APIRouter:
                 lines.append("export HF_HUB_DOWNLOAD_MAX_WORKERS=8")
 
         remote = req.remote_host  # None for local
-        is_windows = req.platform == "windows"
-        # LOCAL execution on a native-Windows host never uses tmux (it uses the
-        # detached-process path below), regardless of the UI-supplied platform.
-        local_windows = IS_WINDOWS and not remote
         logger.info(f"Download request: repo={req.repo_id}, remote={remote}, ssh_port={req.ssh_port}, platform={req.platform}")
 
-        if not is_windows and not local_windows and not await _binary_available("tmux", remote, req.ssh_port):
+        if not await _binary_available("tmux", remote, req.ssh_port):
             return {
                 "ok": False,
                 "error": _missing_binary_message("tmux", remote or "local server"),
                 "session_id": session_id,
             }
 
-        if remote and is_windows:
-            # ── Windows remote: generate .ps1 runner, use Start-Process for background ──
-            remote_runner = f".{session_id}_run.ps1"
-            ps_lines = []
-            ps_lines.append('$sessionDir = "$env:TEMP\\odysseus-sessions"')
-            ps_lines.append('New-Item -ItemType Directory -Force -Path $sessionDir | Out-Null')
-            if req.hf_token:
-                ps_lines.append(f"$env:HF_TOKEN = '{_ps_squote(req.hf_token)}'")
-            if req.local_dir and not is_ollama_download:
-                # Mirror the bash branch — point the HF cache at the user's dir
-                # via env vars instead of --local-dir, so resume works on flaky
-                # transfers (issue #2722).
-                _dl_ps = _ps_squote(req.local_dir.rstrip("/"))
-                ps_lines.append(f"$env:HF_HOME = '{_dl_ps}'")
-                ps_lines.append(f"$env:HUGGINGFACE_HUB_CACHE = '{_dl_ps}/hub'")
-                ps_lines.append(f"$env:HF_HUB_CACHE = '{_dl_ps}/hub'")
-            if req.env_prefix:
-                ps_lines.append(_safe_env_prefix(req.env_prefix))
-            if is_ollama_download:
-                ps_lines.append('if (-not (Get-Command ollama -ErrorAction SilentlyContinue)) { Write-Host "ERROR: Ollama not found. Install from https://ollama.com/download/windows"; exit 127 }')
-                ps_lines.append(f"$null | ollama pull '{_ps_squote(req.repo_id)}'")
-                ps_lines.append('if ($LASTEXITCODE -eq 0) { Write-Host ""; Write-Host "DOWNLOAD_OK" } else { Write-Host ""; Write-Host "DOWNLOAD_FAILED (exit $LASTEXITCODE)" }')
-            else:
-                # Try hf CLI, fall back to Python huggingface_hub, then auto-install
-                ps_lines.append('try {{')
-                ps_lines.append('  $hfPath = Get-Command hf -ErrorAction SilentlyContinue')
-                ps_lines.append('  if ($hfPath) {{')
-                # Pipe $null to stdin to suppress interactive "update available? [Y/n]" prompt
-                ps_lines.append(f'    $null | {hf_cmd}')
-                ps_lines.append('  }} else {{')
-                ps_lines.append('    python -c "import huggingface_hub" 2>$null')
-                ps_lines.append('    if ($LASTEXITCODE -eq 0) {{')
-                ps_lines.append('      Write-Host "hf CLI not found, using Python huggingface_hub..."')
-                ps_lines.append('      python -m pip install -q hf_transfer 2>$null')
-                ps_lines.append('      $env:HF_HUB_ENABLE_HF_TRANSFER = "1"')
-                ps_lines.append(f"      python -c \"import os; from huggingface_hub import snapshot_download; snapshot_download('{req.repo_id}'{_dl_pyarg}, max_workers=8)\"")
-                ps_lines.append('    }} else {{')
-                ps_lines.append('      Write-Host "Installing huggingface-hub..."')
-                ps_lines.append('      python -m pip install -q huggingface-hub hf_transfer')
-                ps_lines.append('      $env:HF_HUB_ENABLE_HF_TRANSFER = "1"')
-                ps_lines.append(f"      python -c \"import os; from huggingface_hub import snapshot_download; snapshot_download('{req.repo_id}'{_dl_pyarg}, max_workers=8)\"")
-                ps_lines.append('    }}')
-                ps_lines.append('  }}')
-                ps_lines.append('  if ($LASTEXITCODE -eq 0) {{ Write-Host ""; Write-Host "DOWNLOAD_OK" }}')
-                ps_lines.append('  else {{ Write-Host ""; Write-Host "DOWNLOAD_FAILED (exit $LASTEXITCODE)" }}')
-                ps_lines.append('}} catch {{')
-                ps_lines.append('  Write-Host ""; Write-Host "DOWNLOAD_FAILED ($_)"')
-                ps_lines.append('}}')
-            ps_lines.append(f'Remove-Item -Force "$HOME\\{remote_runner}" -ErrorAction SilentlyContinue')
-            runner_path = TMUX_LOG_DIR / f"{session_id}_run.ps1"
-            runner_path.write_text("\r\n".join(ps_lines) + "\r\n", encoding="utf-8")
-
-            # scp the .ps1 script, then launch it as a detached process with log + pid files
-            _port = req.ssh_port
-            _Pf = f"-P {_port} " if _port and _port != "22" else ""
-            _pf = f"-p {_port} " if _port and _port != "22" else ""
-            # Start-Process creates a fully detached process that survives SSH disconnect
-            launch_ps = (
-                "$sd = \\\"$env:TEMP\\odysseus-sessions\\\"; "
-                f"Start-Process powershell -ArgumentList '-ExecutionPolicy','Bypass','-File','$HOME\\{remote_runner}' "
-                f"-RedirectStandardOutput \\\"$sd\\{session_id}.log\\\" "
-                f"-RedirectStandardError \\\"$sd\\{session_id}.err.log\\\" "
-                f"-NoNewWindow -PassThru | ForEach-Object {{ $_.Id | Out-File \\\"$sd\\{session_id}.pid\\\" }}"
-            )
-            setup_cmd = (
-                f"scp -O {_Pf}-q '{runner_path}' {remote}:{remote_runner} && "
-                f'ssh {_pf}{remote} "powershell -Command \\"{launch_ps}\\""'
-            )
-
-        elif remote:
+        if remote:
             # ── Linux/Termux remote: create tmux session ON the remote host ──
             remote_runner = f".{session_id}_run.sh"
             runner_lines = ["#!/bin/bash"]
@@ -690,7 +615,7 @@ def setup_cookbook_routes() -> APIRouter:
             if not is_ollama_download:
                 lines.append(_HF_TOKEN_STATUS_SNIPPET)
             # Retry loop — same rationale as the remote-bash path. Issue #2722.
-            _hf_invoke = 'eval "$ODYSSEUS_OLLAMA_PULL_CMD" < /dev/null' if is_ollama_download else (hf_cmd if IS_WINDOWS else f"{hf_cmd} < /dev/null")
+            _hf_invoke = 'eval "$ODYSSEUS_OLLAMA_PULL_CMD" < /dev/null' if is_ollama_download else f"{hf_cmd} < /dev/null"
             lines.append('_max_retries=10; _attempt=0; _ec=0')
             lines.append('while [ $_attempt -lt $_max_retries ]; do')
             lines.append('  _attempt=$((_attempt+1))')
@@ -703,35 +628,26 @@ def setup_cookbook_routes() -> APIRouter:
             lines.append('  fi')
             lines.append('done')
             lines.append('if [ $_ec -eq 0 ]; then echo ""; echo "DOWNLOAD_OK"; else echo ""; echo "DOWNLOAD_FAILED (exit $_ec after $_attempt attempts)"; fi')
-            if not IS_WINDOWS:
-                lines.append(f"rm -f '{wrapper_script}'")
-                lines.append('exec "${SHELL:-/bin/bash}"')
-                wrapper_script.write_text("\n".join(lines) + "\n", encoding="utf-8")
-                wrapper_script.chmod(0o755)
-            setup_cmd = None if IS_WINDOWS else f"tmux set-option -g history-limit 100000 2>/dev/null; tmux new-session -d -s {session_id} {shlex.quote(str(wrapper_script))}"
+            lines.append(f"rm -f '{wrapper_script}'")
+            lines.append('exec "${SHELL:-/bin/bash}"')
+            wrapper_script.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            wrapper_script.chmod(0o755)
+            setup_cmd = f"tmux set-option -g history-limit 100000 2>/dev/null; tmux new-session -d -s {session_id} {shlex.quote(str(wrapper_script))}"
 
         logger.info(f"Model download: {req.repo_id} (backend={'ollama' if is_ollama_download else 'hf'}, include={req.include}, session={session_id}, remote={remote})")
         logger.info(f"Download setup_cmd: {setup_cmd}")
 
-        if setup_cmd is None:
-            # LOCAL Windows: launch the bash wrapper detached; no tmux setup_cmd.
-            try:
-                _launch_local_detached(session_id, lines)
-            except Exception as e:
-                logger.error(f"Local detached download launch failed: {e}")
-                return {"ok": False, "error": str(e), "session_id": session_id}
-        else:
-            proc = await asyncio.create_subprocess_shell(
-                setup_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            await proc.wait()
+        proc = await asyncio.create_subprocess_shell(
+            setup_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await proc.wait()
 
-            if proc.returncode != 0:
-                stderr = (await proc.stderr.read()).decode(errors="replace")
-                logger.error(f"Download failed (rc={proc.returncode}): {stderr}")
-                return {"ok": False, "error": stderr, "session_id": session_id}
+        if proc.returncode != 0:
+            stderr = (await proc.stderr.read()).decode(errors="replace")
+            logger.error(f"Download failed (rc={proc.returncode}): {stderr}")
+            return {"ok": False, "error": stderr, "session_id": session_id}
 
         # Log to assistant
         try:
@@ -951,7 +867,6 @@ def setup_cookbook_routes() -> APIRouter:
         session_id: str,
         remote: str | None,
         ssh_port: str | None,
-        is_windows: bool,
     ) -> None:
         """Drop a freshly-registered endpoint when the cookbook serve dies early.
 
@@ -972,14 +887,7 @@ def setup_cookbook_routes() -> APIRouter:
         """
         # Cumulative wait points: 25 s, 60 s, 2 min, 5 min.
         _waits = [25, 35, 60, 180]
-        # Tmux capture-pane equivalent of the polling path used elsewhere in
-        # this file. Build it once and reuse on each tick. Skip the watchdog
-        # entirely on native-Windows local runs (no tmux). The Windows
-        # detached-process path writes its log to a known file and has its
-        # own lifecycle tracking; punting here keeps the code simple.
-        local_win = is_windows and not remote
-        if local_win:
-            return
+        # Build the capture-pane command once and reuse on each tick.
         if remote:
             ssh_args = ["ssh"]
             if ssh_port and ssh_port != "22":
@@ -1262,8 +1170,6 @@ def setup_cookbook_routes() -> APIRouter:
         TMUX_LOG_DIR.mkdir(parents=True, exist_ok=True)
         session_id = f"serve-{uuid.uuid4().hex[:8]}"
         remote = req.remote_host
-        is_windows = req.platform == "windows"
-
         # Ollama: if the user didn't pin a port, resolve the actual port we'll
         # bind to here (before runner construction) by probing the target host.
         # Otherwise the runner script picks one at runtime and `_auto_register`
@@ -1281,81 +1187,21 @@ def setup_cookbook_routes() -> APIRouter:
             )
             if _ollama_chosen_port:
                 req.cmd = f"OLLAMA_HOST={_ollama_bind_host}:{_ollama_chosen_port} {req.cmd}"
-        # LOCAL execution on a native-Windows host never uses tmux (detached
-        # process path below), regardless of the UI-supplied platform.
-        local_windows = IS_WINDOWS and not remote
-        if is_windows and remote and "diffusion_server.py" in req.cmd:
-            raise HTTPException(
-                400,
-                "Remote Windows Diffusers serving is not supported yet; use local Windows or a Linux remote server.",
-            )
 
-        if not is_windows and not local_windows and not await _binary_available("tmux", remote, req.ssh_port):
+        if not await _binary_available("tmux", remote, req.ssh_port):
             return {
                 "ok": False,
                 "error": _missing_binary_message("tmux", remote or "local server"),
                 "session_id": session_id,
             }
-        if _needs_binary(req.cmd, "docker") and not await _binary_available("docker", remote, req.ssh_port, windows=is_windows):
+        if _needs_binary(req.cmd, "docker") and not await _binary_available("docker", remote, req.ssh_port):
             return {
                 "ok": False,
                 "error": _missing_binary_message("docker", remote or "local server"),
                 "session_id": session_id,
             }
 
-        if is_windows and remote:
-            # ── Windows remote: generate .ps1 serve runner ──
-            remote_runner = f".{session_id}_run.ps1"
-            ps_lines = []
-            ps_lines.append('$sessionDir = "$env:TEMP\\odysseus-sessions"')
-            ps_lines.append('New-Item -ItemType Directory -Force -Path $sessionDir | Out-Null')
-            if req.hf_token:
-                ps_lines.append(f"$env:HF_TOKEN = '{_ps_squote(req.hf_token)}'")
-            if req.gpus:
-                ps_lines.append(f"$env:CUDA_VISIBLE_DEVICES = '{req.gpus}'")
-            if req.env_prefix:
-                ps_lines.append(_safe_env_prefix(req.env_prefix))
-            # Auto-install ollama if the command uses it
-            if "ollama" in req.cmd:
-                ps_lines.append('# Check if ollama is available')
-                ps_lines.append('if (-not (Get-Command ollama -ErrorAction SilentlyContinue)) {')
-                ps_lines.append('  Write-Host "Ollama not found. Please install from https://ollama.com/download/windows"')
-                ps_lines.append('  exit 1')
-                ps_lines.append('}')
-            elif "llama_cpp" in req.cmd or "llama-server" in req.cmd:
-                ps_lines.append('# Auto-install llama-cpp-python if missing')
-                ps_lines.append('try { python -c "import llama_cpp" 2>$null } catch {}')
-                ps_lines.append('if ($LASTEXITCODE -ne 0) {')
-                ps_lines.append('  Write-Host "Installing llama-cpp-python..."')
-                ps_lines.append('  python -m pip install llama-cpp-python[server]')
-                ps_lines.append('}')
-            elif "vllm" in req.cmd:
-                ps_lines.append('Write-Host "ERROR: vLLM is not supported on Windows. Use Ollama or llama.cpp instead."')
-                ps_lines.append('exit 1')
-            ps_lines.append(req.cmd)
-            if is_pip_install:
-                ps_lines.append('if ($LASTEXITCODE -eq 0) { Write-Host ""; Write-Host "DOWNLOAD_OK" }')
-            ps_lines.append('Write-Host ""')
-            ps_lines.append('Write-Host "=== Process exited with code $LASTEXITCODE ==="')
-            runner_path = TMUX_LOG_DIR / f"{session_id}_run.ps1"
-            runner_path.write_text("\r\n".join(ps_lines) + "\r\n", encoding="utf-8")
-
-            _port = req.ssh_port
-            _Pf = f"-P {_port} " if _port and _port != "22" else ""
-            _pf = f"-p {_port} " if _port and _port != "22" else ""
-            launch_ps = (
-                "$sd = \\\"$env:TEMP\\odysseus-sessions\\\"; "
-                f"Start-Process powershell -ArgumentList '-ExecutionPolicy','Bypass','-File','$HOME\\{remote_runner}' "
-                f"-RedirectStandardOutput \\\"$sd\\{session_id}.log\\\" "
-                f"-RedirectStandardError \\\"$sd\\{session_id}.err.log\\\" "
-                f"-NoNewWindow -PassThru | ForEach-Object {{ $_.Id | Out-File \\\"$sd\\{session_id}.pid\\\" }}"
-            )
-            setup_cmd = (
-                f"scp -O {_Pf}-q '{runner_path}' {remote}:{remote_runner} && "
-                f'ssh {_pf}{remote} "powershell -Command \\"{launch_ps}\\""'
-            )
-        else:
-            # ── Linux/Termux: bash + tmux (existing flow) ──
+        # ── Linux/Termux: bash + tmux (existing flow) ──
             runner_lines = ["#!/bin/bash"]
             # Mirror every line of stdout+stderr into a persistent log file
             # on the host running the serve. This is the file tail_serve_output
@@ -1518,7 +1364,7 @@ def setup_cookbook_routes() -> APIRouter:
                 handled_ollama_sidecar_probe = True
                 _append_serve_preflight_exit_lines(
                     runner_lines,
-                    keep_shell_open=not local_windows,
+                    keep_shell_open=True,
                 )
                 runner_lines.append(req.cmd)
                 runner_lines.append('_ody_exit=$?')
@@ -1533,35 +1379,21 @@ def setup_cookbook_routes() -> APIRouter:
             if not handled_ollama_serve and not handled_ollama_sidecar_probe:
                 _append_serve_preflight_exit_lines(
                     runner_lines,
-                    keep_shell_open=not local_windows,
+                    keep_shell_open=True,
                 )
                 runner_lines.append(req.cmd)
-                if local_windows:
-                    # Detached background process — no interactive shell to keep open.
-                    # Print the exit marker the status poller looks for, then stop.
-                    _append_serve_exit_code_lines(
-                        runner_lines,
-                        keep_shell_open=False,
-                        is_pip_install=is_pip_install,
-                    )
-                else:
-                    # Keep shell open after exit so user can see errors
-                    _append_serve_exit_code_lines(
-                        runner_lines,
-                        keep_shell_open=True,
-                        is_pip_install=is_pip_install,
-                    )
+                # Keep shell open after exit so user can see errors
+                _append_serve_exit_code_lines(
+                    runner_lines,
+                    keep_shell_open=True,
+                    is_pip_install=is_pip_install,
+                )
 
             runner_path = TMUX_LOG_DIR / f"{session_id}_run.sh"
             runner_path.write_text("\n".join(runner_lines) + "\n", encoding="utf-8")
-            # chmod is a no-op on Windows; bash on Windows runs the script
-            # regardless of the executable bit.
             safe_chmod(runner_path, 0o755)
 
-            if local_windows:
-                # LOCAL Windows: launch the bash runner detached (tmux replacement).
-                setup_cmd = None
-            elif remote:
+            if remote:
                 remote_runner = f".{session_id}_run.sh"
                 # If command references scripts/, scp those too
                 scp_extras = ""
@@ -1587,24 +1419,16 @@ def setup_cookbook_routes() -> APIRouter:
             else:
                 setup_cmd = f"tmux set-option -g history-limit 100000 2>/dev/null; tmux new-session -d -s {session_id} {shlex.quote(str(runner_path))}"
 
-        if setup_cmd is None:
-            # LOCAL Windows: launch the bash runner detached; no tmux setup_cmd.
-            try:
-                _launch_local_detached(session_id, runner_lines)
-            except Exception as e:
-                logger.error(f"Local detached serve launch failed: {e}")
-                return {"ok": False, "error": str(e), "session_id": session_id}
-        else:
-            proc = await asyncio.create_subprocess_shell(
-                setup_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            await proc.wait()
+        proc = await asyncio.create_subprocess_shell(
+            setup_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await proc.wait()
 
-            if proc.returncode != 0:
-                stderr = (await proc.stderr.read()).decode(errors="replace")
-                return {"ok": False, "error": stderr, "session_id": session_id}
+        if proc.returncode != 0:
+            stderr = (await proc.stderr.read()).decode(errors="replace")
+            return {"ok": False, "error": stderr, "session_id": session_id}
 
         # Auto-register a model endpoint so the served model shows up in the model
         # picker with no manual /setup step. Diffusion models get an image
@@ -1634,7 +1458,6 @@ def setup_cookbook_routes() -> APIRouter:
                 session_id=session_id,
                 remote=remote,
                 ssh_port=req.ssh_port,
-                is_windows=is_windows,
             ))
 
         # Log to assistant
@@ -2080,16 +1903,6 @@ def setup_cookbook_routes() -> APIRouter:
                 proc = await asyncio.create_subprocess_shell(
                     cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
                 )
-            elif IS_WINDOWS:
-                # No `kill` binary / POSIX signals on Windows. taskkill /F /T tears
-                # down the PID and its children. There's no graceful-vs-force
-                # distinction, so TERM/KILL/INT all map to the same forced kill.
-                # NB: never use os.kill(pid, 0) to probe here — on Windows that
-                # routes to TerminateProcess and would kill the process.
-                if not pid_alive(req.pid):
-                    return {"ok": False, "error": f"PID {req.pid} is not running"}
-                await asyncio.to_thread(kill_process_tree, req.pid)
-                return {"ok": True, "pid": req.pid, "signal": sig}
             else:
                 proc = await asyncio.create_subprocess_exec(
                     "kill", f"-{sig}", str(req.pid),
@@ -2951,26 +2764,7 @@ def setup_cookbook_routes() -> APIRouter:
                 except HTTPException:
                     logger.warning(f"Skipping task with unsafe sshPort: {_tport!r}")
                     continue
-            if task_platform == "windows" and remote:
-                # Windows: check PID file + Get-Process, read log tail
-                sd = "$env:TEMP\\odysseus-sessions"
-                ssh_base = ["ssh"]
-                if _tport and _tport != "22":
-                    ssh_base.extend(["-p", str(_tport)])
-                check_cmd = ssh_base + [
-                    remote,
-                    "powershell",
-                    "-Command",
-                    f"$pid = Get-Content \"{sd}\\{session_id}.pid\" -ErrorAction SilentlyContinue; "
-                    "if ($pid) {{ Get-Process -Id $pid -ErrorAction SilentlyContinue | Out-Null; if ($?) {{ exit 0 }} else {{ exit 1 }} }} else {{ exit 1 }}"
-                ]
-                capture_cmd = ssh_base + [
-                    remote,
-                    "powershell",
-                    "-Command",
-                    f"Get-Content \"{sd}\\{session_id}.log\" -Tail 10 -ErrorAction SilentlyContinue",
-                ]
-            elif remote:
+            if remote:
                 ssh_base = ["ssh"]
                 if _tport and _tport != "22":
                     ssh_base.extend(["-p", str(_tport)])
@@ -2981,87 +2775,52 @@ def setup_cookbook_routes() -> APIRouter:
                 # as just "Locale: C / Ubuntu_Odysseus ❯" and the agent
                 # can't diagnose the actual error.
                 capture_cmd = ssh_base + [remote, "tmux", "capture-pane", "-t", session_id, "-p", "-S", "-500"]
-            elif IS_WINDOWS:
-                # LOCAL Windows task: launched as a detached process (no tmux).
-                # Liveness comes from the <session>.pid file, output from the
-                # <session>.log file the wrapper redirects into. No subprocess.
-                check_cmd = None
-                capture_cmd = None
             else:
                 check_cmd = ["tmux", "has-session", "-t", session_id]
                 capture_cmd = ["tmux", "capture-pane", "-t", session_id, "-p", "-S", "-500"]
 
-            local_win_task = (not remote) and IS_WINDOWS
-
             progress_text = ""
             full_snapshot = ""
 
-            if local_win_task:
-                # File-based liveness + output for the detached-process model.
-                pid_path = TMUX_LOG_DIR / f"{session_id}.pid"
-                log_path = TMUX_LOG_DIR / f"{session_id}.log"
-                task_pid = None
-                try:
-                    task_pid = int(pid_path.read_text(encoding="utf-8").strip())
-                except Exception:
-                    task_pid = None
-                is_alive = pid_alive(task_pid)
-                try:
-                    if log_path.exists():
-                        full_snapshot = log_path.read_text(
-                            encoding="utf-8", errors="replace"
-                        ).strip()[-12000:]
-                        lines = [l.strip() for l in full_snapshot.split('\n') if l.strip()]
-                        downloading_lines = [l for l in lines if l.startswith("Downloading")]
-                        if downloading_lines:
-                            progress_text = downloading_lines[-1]
-                        elif lines:
-                            progress_text = lines[-1]
-                except Exception:
-                    pass
+            # Skip the live SSH check entirely for tasks already in a
+            # terminal state — they won't change, and 10s timeouts
+            # stacked per task were the dominant cost of this whole
+            # status endpoint (3+ minute stalls with ~8 accumulated
+            # stopped tasks). The agent's `list_served_models` call
+            # was blocking the chat stream every time.
+            _task_status = (task.get("status") or "").lower()
+            if _task_status in {"stopped", "done", "completed",
+                                "crashed", "error", "failed",
+                                "ended", "killed"}:
+                is_alive = False
+                # Keep the persisted output_tail for the UI — it's
+                # what the agent uses to diagnose past failures.
+                full_snapshot = (task.get("output") or "")[-12000:]
             else:
-                # Skip the live SSH check entirely for tasks already in a
-                # terminal state — they won't change, and 10s timeouts
-                # stacked per task were the dominant cost of this whole
-                # status endpoint (3+ minute stalls with ~8 accumulated
-                # stopped tasks). The agent's `list_served_models` call
-                # was blocking the chat stream every time.
-                _task_status = (task.get("status") or "").lower()
-                if _task_status in {"stopped", "done", "completed",
-                                    "crashed", "error", "failed",
-                                    "ended", "killed"}:
+                try:
+                    alive = subprocess.run(check_cmd, timeout=4, capture_output=True)
+                    is_alive = alive.returncode == 0
+                except Exception:
                     is_alive = False
-                    # Keep the persisted output_tail for the UI — it's
-                    # what the agent uses to diagnose past failures.
-                    full_snapshot = (task.get("output") or "")[-12000:]
-                else:
+
+                # Capture last lines for progress. Prefer the "Downloading" line
+                # (real aggregate bytes) over "Fetching N files" (whole-file count that
+                # lags with hf_transfer). Falls back to the true last line otherwise.
+                if is_alive:
                     try:
-                        alive = subprocess.run(check_cmd, timeout=4, capture_output=True)
-                        is_alive = alive.returncode == 0
+                        cap = subprocess.run(capture_cmd, timeout=4, capture_output=True, text=True)
+                        if cap.returncode == 0:
+                            full_snapshot = cap.stdout.strip()
+                            lines = [l.strip() for l in full_snapshot.split('\n') if l.strip()]
+                            downloading_lines = [l for l in lines if l.startswith("Downloading")]
+                            if downloading_lines:
+                                progress_text = downloading_lines[-1]
+                            elif lines:
+                                progress_text = lines[-1]
                     except Exception:
-                        is_alive = False
+                        pass
 
-                    # Capture last lines for progress. Prefer the "Downloading" line
-                    # (real aggregate bytes) over "Fetching N files" (whole-file count that
-                    # lags with hf_transfer). Falls back to the true last line otherwise.
-                    if is_alive:
-                        try:
-                            cap = subprocess.run(capture_cmd, timeout=4, capture_output=True, text=True)
-                            if cap.returncode == 0:
-                                full_snapshot = cap.stdout.strip()
-                                lines = [l.strip() for l in full_snapshot.split('\n') if l.strip()]
-                                downloading_lines = [l for l in lines if l.startswith("Downloading")]
-                                if downloading_lines:
-                                    progress_text = downloading_lines[-1]
-                                elif lines:
-                                    progress_text = lines[-1]
-                        except Exception:
-                            pass
-
-            # Determine status. For the local-Windows detached model the log file
-            # persists after the process exits, so a finished download still has a
-            # snapshot to classify (DOWNLOAD_OK / exit marker) — evaluate it even
-            # when the PID is gone instead of blindly reporting "stopped".
+            # Determine status
             download_zero_files = False
             exit_code = None
             status = "unknown"
@@ -3075,7 +2834,7 @@ def setup_cookbook_routes() -> APIRouter:
                     or _download_cache_incomplete(_payload.get("repo_id") or model, remote, str(_tport or ""), _payload.get("local_dir") or "")
                 )
             )
-            if is_alive or (local_win_task and full_snapshot):
+            if is_alive:
                 lower = full_snapshot.lower()
                 exit_match = re.search(r"=== process exited with code\s+(-?\d+)", full_snapshot, re.I)
                 has_exit = exit_match is not None
@@ -3108,7 +2867,6 @@ def setup_cookbook_routes() -> APIRouter:
                 elif "application startup complete" in lower:
                     status = "ready"
                 elif not is_alive:
-                    # local-Windows: process gone, log has no success/ready marker.
                     status = "stopped"
                 else:
                     status = "running"

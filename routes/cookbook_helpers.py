@@ -3,7 +3,6 @@ Extracted from cookbook_routes.py; the routes module imports the symbols it need
 
 import json
 import logging
-import ntpath
 import os
 import posixpath
 import re
@@ -50,16 +49,6 @@ _GPU_LIST_RE = re.compile(r"^\d+(?:,\d+)*$")
 # so injection vectors remain rejected. A leading ~ is expanded to $HOME at
 # command-build time. (Drive letters stay ASCII: ``[A-Za-z]:``.)
 _LOCAL_DIR_RE = re.compile(r"^~?(?:/[\w. -]*)+$|^~$")
-_WINDOWS_LOCAL_DIR_RE = re.compile(r"^[A-Za-z]:[\\/](?:[\w. -]+(?:[\\/][\w. -]+)*[\\/]?)?$")
-_WINDOWS_DRIVE_PATH_RE = re.compile(r"^[A-Za-z]:[\\/]")
-
-
-def _git_bash_path(path: str) -> str:
-    m = re.match(r"^([A-Za-z]):[\\/](.*)$", path)
-    if not m:
-        return path
-    drive, rest = m.groups()
-    return f"/{drive.lower()}/{rest.replace(chr(92), '/')}"
 
 
 def _validate_repo_id(v: str | None) -> str:
@@ -116,12 +105,11 @@ def _validate_local_dir(v: str | None) -> str | None:
     if len(v) >= 2 and v[0] == v[-1] and v[0] in {"'", '"'}:
         v = v[1:-1]
     v = v.rstrip("/") or "/"
-    if not (_LOCAL_DIR_RE.match(v) or _WINDOWS_LOCAL_DIR_RE.match(v)):
+    if not _LOCAL_DIR_RE.match(v):
         raise HTTPException(400, "Invalid local_dir — must be an absolute or ~ path with no shell metacharacters")
     # Reject path segments that start with '-' (option injection). '-' is in the
-    # allowlist, so a dir like ``/models/-rf`` or ``D:\models\-rf`` could be read
-    # as a CLI flag by hf/etc. — and quoting does NOT stop a value from being
-    # parsed as an option. This is the one residual that command-build-time
+    # allowlist, so a dir like ``/models/-rf`` could be read as a CLI flag by hf/etc.
+    # — and quoting does NOT stop a value from being parsed as an option. This is
     # quoting can't cover, so the guard lives here, keeping the safety wholly
     # inside the validator rather than relying on consumers.
     if any(seg.startswith("-") for seg in re.split(r"[\\/]", v) if seg):
@@ -159,15 +147,11 @@ def _local_tooling_path_export(executable: str) -> str:
     only `pip3`/`python3 -m pip`). Local runs only; meaningless over SSH.
     """
     # This builds a bash snippet, so an explicit POSIX absolute path should keep
-    # POSIX semantics even when the app/tests run on Windows. Otherwise
-    # os.path.abspath("/opt/...") would incorrectly turn it into "D:\\opt\\...".
+    # POSIX semantics.
     if executable.startswith("/"):
         bin_dir = posixpath.dirname(executable)
-    elif _WINDOWS_DRIVE_PATH_RE.match(executable):
-        bin_dir = ntpath.dirname(executable)
     else:
         bin_dir = os.path.dirname(os.path.abspath(executable))
-    bin_dir = _git_bash_path(bin_dir)
     # Escape for a double-quoted context: $PATH must still expand, but spaces
     # and shell metacharacters in the path must be preserved literally.
     esc = (
@@ -238,7 +222,6 @@ def _pip_install_fallback_chain(package: str, *, python_cmd: str = "python3 -m p
     exit code is preserved (no ``| tail`` masking) and the last 5 lines of
     pip output appear in the Cookbook log on failure.
     """
-    from core.platform_compat import IS_WINDOWS
     upgrade_flag = " -U" if upgrade else ""
     # Shell-quote the package spec: an extras spec like ``llama-cpp-python[server]``
     # contains brackets that bash would treat as a glob, so it must be quoted

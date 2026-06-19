@@ -752,8 +752,8 @@ export async function _hwfitFetch(fresh = false) {
     }
     _hwfitCache = data;
     _hwfitRenderHw(hw, data.system);
-    // Propagate local platform from hardware probe so _isWindows(task) works
-    // for local tasks (menu items, shell commands, etc.).
+    // Propagate local platform from hardware probe for platform-aware
+    // behavior (menu items, shell commands, etc.).
     if (!remoteHost && data.system && data.system.platform) {
       _envState.platform = data.system.platform;
     }
@@ -2265,7 +2265,7 @@ export function _hwfitInit() {
               if (existingBadge) existingBadge.remove();
               const badge = document.createElement('span');
               badge.className = 'cookbook-platform-badge';
-              badge.style.cssText = 'font-size:8px;padding:1px 5px;border-radius:3px;border:1px solid ' + (data.platform === 'windows' ? 'var(--cyan,#56b6c2)' : 'var(--green,#98c379)') + ';color:' + (data.platform === 'windows' ? 'var(--cyan,#56b6c2)' : 'var(--green,#98c379)') + ';opacity:0.7;white-space:nowrap;flex-shrink:0;';
+              badge.style.cssText = 'font-size:8px;padding:1px 5px;border-radius:3px;border:1px solid var(--green,#98c379);color:var(--green,#98c379);opacity:0.7;white-space:nowrap;flex-shrink:0;';
               badge.textContent = data.platform;
               setupBtn.parentNode.insertBefore(badge, setupBtn);
             }

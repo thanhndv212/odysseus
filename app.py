@@ -5,12 +5,10 @@ import sys
 
 
 def register_static_mime_types() -> None:
-    """Force stable JS module MIME types across platforms.
+    """Force stable JS module MIME types.
 
-    Some native Windows setups inherit stale/incorrect registry mappings for
-    ``.js``/``.mjs``, which can make Starlette serve ES modules with a non-JS
-    ``Content-Type`` and cause the UI to load but fail on click. Re-register the
-    standard MIME types at startup so static assets are served consistently.
+    Re-register the standard MIME types at startup so static assets are served
+    consistently.
     """
 
     mimetypes.add_type("text/javascript", ".js")
@@ -18,15 +16,6 @@ def register_static_mime_types() -> None:
 
 
 register_static_mime_types()
-
-# Windows: force HuggingFace/fastembed to COPY model files instead of symlinking.
-# On a network-share/UNC data dir Windows can't follow HF's symlinks ([WinError
-# 1463]), so the ONNX embedding model fails to load. huggingface_hub reads this
-# at import time, so set it before anything pulls it in. (Mirrored in
-# src/embeddings.py for non-server entrypoints.)
-if os.name == "nt":
-    os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS", "1")
-    os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 
 from dotenv import load_dotenv
 # encoding="utf-8-sig" tolerates a UTF-8 BOM in .env — a common Windows gotcha

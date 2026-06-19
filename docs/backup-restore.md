@@ -99,31 +99,11 @@ nightly snapshot copied offsite:
 Swap the `--out` target for `scp`, `rclone`, `s3cmd`, or similar to push the
 snapshot to remote storage.
 
-## Docker vs native installs
+## Native installs
 
-The tool reads `data/` and writes `backups/` relative to the repository root, so
-where you run it matters:
+The tool reads `data/` and writes `backups/` relative to the repository root.
+Run it from the repo root as shown above. `data/` and `backups/` are both in
+the repo directory.
 
-- **Native installs** — run it from the repo root as shown above. `data/` and
-  `backups/` are both in the repo directory.
-- **Docker** — `docker-compose.yml` bind-mounts the host's `./data` to
-  `/app/data`, so the live data is also present on the host. **Run the tool on
-  the host** from the repo root; the snapshot reads the bind-mounted `./data` and
-  writes to `./backups` on the host. Running it *inside* the container is not
-  recommended, because `backups/` is not a mounted volume and the tarball would
-  be lost when the container is recreated.
-
-> **ChromaDB caveat (Docker only).** In the Docker setup, ChromaDB stores its
-> vectors in a separate Compose-managed volume (declared as `chromadb-data`),
-> **not** under `./data`. `odysseus-backup` therefore does not capture the Docker
-> ChromaDB store. Back it up separately if you need it. Compose prefixes the
-> volume with the project name, so find the real name first
-> (`docker volume ls | grep chromadb`), then archive it — for example:
->
-> ```bash
-> docker run --rm -v <project>_chromadb-data:/data -v "$PWD":/backup \
->   alpine tar czf /backup/chromadb.tar.gz -C /data .
-> ```
->
-> On native installs ChromaDB lives at `data/chroma/` and is included in the
-> snapshot normally.
+ChromaDB lives at `data/chroma/` on native installs and is included in the
+snapshot normally.

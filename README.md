@@ -30,13 +30,14 @@
 ```bash
 git clone https://github.com/pewdiepie-archdaemon/odysseus.git
 cd odysseus
-cp .env.example .env
-docker compose up -d --build
+./start-macos.sh
 ```
 
-Open `http://localhost:7000` when the containers are healthy. The first admin password is printed in `docker compose logs odysseus`.
+Open `http://127.0.0.1:7860` when the server is ready. The first admin password
+is printed in the terminal.
 
-Native installs, GPU notes, Windows/macOS instructions, HTTPS, and configuration live in the [setup guide](docs/setup.md).
+Native installs, GPU notes, macOS instructions, HTTPS, and configuration live
+in the [setup guide](docs/setup.md).
 
 ## Features
 

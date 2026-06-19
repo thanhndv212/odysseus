@@ -1,13 +1,12 @@
 """Regression: FASTEMBED_CACHE_DIR must tolerate a PRESENT-but-EMPTY
 FASTEMBED_CACHE_PATH.
 
-docker-compose.yml injects ``FASTEMBED_CACHE_PATH=${FASTEMBED_CACHE_PATH:-}``,
-which sets the variable to ``""`` when the host has not defined it. The old
-``os.getenv("FASTEMBED_CACHE_PATH", default)`` only used the default when the
-variable was ABSENT, so an empty value made ``FASTEMBED_CACHE_DIR == ""`` →
-``os.makedirs("")`` raised ``[Errno 2] No such file or directory: ''`` →
+When the env var ``FASTEMBED_CACHE_PATH`` is set to ``""`` (present but
+empty), the old ``os.getenv("FASTEMBED_CACHE_PATH", default)`` only used the
+default when the variable was ABSENT, so an empty value made
+``FASTEMBED_CACHE_DIR == ""`` → ``os.makedirs("")`` raised ``[Errno 2]`` →
 FastEmbed failed to initialise and every vector feature (RAG, semantic memory,
-tool index) silently degraded on the default Docker stack.
+tool index) silently degraded.
 
 These tests pin the fix: empty is treated like absent → use the DATA_DIR
 default, while an explicit non-empty override is still honoured.

@@ -16,7 +16,7 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
 from core.middleware import require_admin
-from core.platform_compat import IS_WINDOWS, safe_chmod, which_tool
+from core.platform_compat import safe_chmod, which_tool
 from src.constants import VAULT_FILE as _VAULT_FILE
 
 logger = logging.getLogger(__name__)
@@ -25,23 +25,10 @@ VAULT_FILE = Path(_VAULT_FILE)
 
 
 def _find_bw() -> str:
-    """Locate the bw binary, checking PATH and common npm-global locations.
-
-    On Windows the Bitwarden CLI shim is `bw.cmd`/`bw.exe`, resolved by
-    which_tool via PATHEXT.
-    """
+    """Locate the bw binary, checking PATH and common npm-global locations."""
     p = which_tool("bw")
     if p:
         return p
-    if IS_WINDOWS:
-        appdata = os.environ.get("APPDATA", os.path.expanduser("~"))
-        for candidate in (
-            os.path.join(appdata, "npm", "bw.cmd"),
-            os.path.join(appdata, "npm", "bw.exe"),
-        ):
-            if os.path.isfile(candidate):
-                return candidate
-        return "bw"
     home = os.path.expanduser("~")
     for candidate in (
         f"{home}/.npm-global/bin/bw",

@@ -13,7 +13,6 @@ def _load_builtin_mcp(monkeypatch):
     core = types.ModuleType("core")
     core.__path__ = []
     platform_compat = types.ModuleType("core.platform_compat")
-    platform_compat.IS_WINDOWS = False
     platform_compat.which_tool = lambda name: None
     monkeypatch.setitem(sys.modules, "core", core)
     monkeypatch.setitem(sys.modules, "core.platform_compat", platform_compat)

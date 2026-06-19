@@ -18,12 +18,10 @@ let _getPort;
 let _sshPrefix;
 let _serverByVal;
 let _getPlatform;
-let _isWindows;
 let _isMetal;
 let _buildEnvPrefix;
 let _buildServeCmd;
 let _shellQuote;
-let _psQuote;
 let _detectBackend;
 let _detectToolParser;
 let _detectModelOptimizations;
@@ -124,15 +122,7 @@ function _selectedServeTarget(panel) {
   };
 }
 
-function _remoteWindowsDiffusersUnsupported(target) {
-  return !!(target?.host && target?.platform === 'windows');
-}
-
 function _backendChoicesForTarget(target) {
-  if (target?.platform === 'windows') {
-    if (_remoteWindowsDiffusersUnsupported(target)) return [['llamacpp','llama.cpp']];
-    return [['llamacpp','llama.cpp'],['diffusers','Diffusers']];
-  }
   return _isMetal()
     ? [['llamacpp','llama.cpp'],['ollama','Ollama']]
     : [['vllm','vLLM'],['sglang','SGLang'],['llamacpp','llama.cpp'],['ollama','Ollama'],['diffusers','Diffusers']];
@@ -1981,12 +1971,6 @@ function _rerenderCachedModels() {
           else serveState[el.dataset.field] = el.value;
         });
         serveState.backend = serveState.backend || (_detectBackend(m).backend) || 'vllm';
-        const launchTarget = _selectedServeTarget(panel);
-        if (serveState.backend === 'diffusers' && _remoteWindowsDiffusersUnsupported(launchTarget)) {
-          _restoreLaunchBtn();
-          uiModule.showToast('Diffusers serving is not supported on remote Windows servers yet. Use local Windows or a Linux server.', 9000);
-          return;
-        }
 
         // Pre-launch: check our own task list for a serve already running
         // on this host. Offer to stop+launch as the default action — the
@@ -2237,22 +2221,11 @@ async function _deleteCachedModel(repo, itemEl, skipConfirm = false, model = nul
   }
   const host = _resolveCacheHost();
   let cmd;
-  if (_isWindows()) {
-    const winTarget = target.startsWith('~')
-      ? target.replace(/^~/, '$env:USERPROFILE').replace(/\//g, '\\')
-      : target.replace(/\//g, '\\');
-    cmd = `Remove-Item -Recurse -Force "${winTarget}" -ErrorAction SilentlyContinue`;
-    if (host) {
-      const pf = _sshPrefix(_getPort(host));
-      cmd = `ssh ${pf}${host} "powershell -Command \\"${cmd}\\""`;
-    }
-  } else {
-    // $HOME expands inside double quotes; ~ would not, so normalize the
-    // fallback. Quoting also handles spaces in custom model-dir paths.
-    const unixTarget = target.startsWith('~') ? target.replace(/^~/, '$HOME') : target;
-    cmd = `rm -rf "${unixTarget}"`;
-    if (host) cmd = _sshCmd(host, cmd, _getPort(host));
-  }
+  // $HOME expands inside double quotes; ~ would not, so normalize the
+  // fallback. Quoting also handles spaces in custom model-dir paths.
+  const unixTarget = target.startsWith('~') ? target.replace(/^~/, '$HOME') : target;
+  cmd = `rm -rf "${unixTarget}"`;
+  if (host) cmd = _sshCmd(host, cmd, _getPort(host));
   // Deleting a large model (tens/hundreds of GB) can take a while, especially
   // over SSH — show a whirlpool spinner on the row so it doesn't look frozen.
   let _wp = null, _prevPos = '';
@@ -2315,19 +2288,11 @@ function _retryCachedModel(repo, m) {
     if (_target.port) payload.ssh_port = _target.port;
   }
   if (_target.platform) payload.platform = _target.platform;
-  if (_isWindows()) {
-    if (_envState.env === 'venv' && _envState.envPath) {
-      payload.env_prefix = '& ' + _psQuote(_envState.envPath.endsWith('\\Scripts\\Activate.ps1') ? _envState.envPath : _envState.envPath + '\\Scripts\\Activate.ps1');
-    } else if (_envState.env === 'conda' && _envState.envPath) {
-      payload.env_prefix = 'conda activate ' + _psQuote(_envState.envPath);
-    }
-  } else {
-    if (_envState.env === 'venv' && _envState.envPath) {
-      const p = _envState.envPath;
-      payload.env_prefix = 'source ' + _shellQuote(p.endsWith('/bin/activate') ? p : p + '/bin/activate');
-    } else if (_envState.env === 'conda' && _envState.envPath) {
-      payload.env_prefix = 'eval "$(conda shell.bash hook)" && conda activate ' + _shellQuote(_envState.envPath);
-    }
+  if (_envState.env === 'venv' && _envState.envPath) {
+    const p = _envState.envPath;
+    payload.env_prefix = 'source ' + _shellQuote(p.endsWith('/bin/activate') ? p : p + '/bin/activate');
+  } else if (_envState.env === 'conda' && _envState.envPath) {
+    payload.env_prefix = 'eval "$(conda shell.bash hook)" && conda activate ' + _shellQuote(_envState.envPath);
   }
   _retryDownload((m?.name || repo).split('/').pop(), payload);
 }
@@ -2581,12 +2546,10 @@ export function initServe(shared) {
   _sshPrefix = shared._sshPrefix;
   _serverByVal = shared._serverByVal;
   _getPlatform = shared._getPlatform;
-  _isWindows = shared._isWindows;
   _isMetal = shared._isMetal;
   _buildEnvPrefix = shared._buildEnvPrefix;
   _buildServeCmd = shared._buildServeCmd;
   _shellQuote = shared._shellQuote;
-  _psQuote = shared._psQuote;
   _detectBackend = shared._detectBackend;
   _detectToolParser = shared._detectToolParser;
   _detectModelOptimizations = shared._detectModelOptimizations;

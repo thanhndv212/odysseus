@@ -18,8 +18,6 @@ not start them.
 | **Workflow security** (actionlint + zizmor) | A broken or insecure automation file that could leak the repo's access token | Yes |
 | **Dependency review** | A pull request that adds a software library with a known security hole | Yes |
 | **pip-audit** | Known security holes in the Python libraries already used | No (advisory) |
-| **Container scan: hadolint** | Mistakes and insecure patterns in the `Dockerfile` | Yes |
-| **Container scan: Trivy** | Known security holes in the Docker image | No (advisory) |
 | **CodeQL** | Real bugs in the app's own code: injection, auth mistakes, path traversal | No (advisory) |
 
 "Blocks a merge" means a red X appears on the pull request and, once you enable
@@ -35,7 +33,7 @@ libraries, not something a given pull request introduced.
 - **Checks tab of a pull request**: the pass/fail of each check. A green tick is
   good; a red X needs attention.
 - **Security tab of the repository**: detailed findings from the advisory
-  scanners (Trivy and CodeQL). This is your dashboard.
+  scanners (CodeQL). This is your dashboard.
 
 ## If a check fails
 
@@ -45,9 +43,9 @@ libraries, not something a given pull request introduced.
 - **Dependency review failed**: the pull request adds a library with a known
   vulnerability. Ask the contributor to use a patched version, or decline the
   change.
-- **hadolint / workflow security failed**: the contributor changed the
-  `Dockerfile` or an automation file in a way the linter rejects. Ask them to
-  address the message shown in the failed check.
+- **Workflow security failed**: the contributor changed an automation file in a
+  way the linter rejects. Ask them to address the message shown in the failed
+  check.
 
 ## One-time settings to turn on
 
@@ -69,12 +67,11 @@ This makes the **Merge** button refuse to work until the gating checks pass.
    - `JS syntax (node --check)`
    - `gitleaks`
    - `actionlint`
-   - `zizmor (Actions SAST)`
-   - `hadolint (Dockerfile lint)`
-   - `dependency-review (PR gate)`
+    - `zizmor (Actions SAST)`
+    - `dependency-review (PR gate)`
 
    The first two come from the correctness CI (`ci.yml`); the rest are this
-   security suite. Leave pytest, pip-audit, Trivy, and CodeQL unchecked so they
+   security suite. Leave pytest, pip-audit, and CodeQL unchecked so they
    stay advisory.
 7. Also enable **Require a pull request before merging** and **Require review
    from Code Owners** (this uses the `.github/CODEOWNERS` file so every change
@@ -102,6 +99,6 @@ let the workflows run on one pull request first, then add them here.
 ## Keeping it current
 
 `.github/dependabot.yml` opens small weekly pull requests to update Python and
-npm packages, the Docker base image, and the pinned automation actions
-themselves. Review and merge those like any other pull request; they keep the
-project patched without manual tracking.
+npm packages, and the pinned automation actions themselves. Review and merge
+those like any other pull request; they keep the project patched without manual
+tracking.

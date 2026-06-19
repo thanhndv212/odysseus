@@ -33,7 +33,6 @@ from core.atomic_io import atomic_write_json
 from core.platform_compat import (
     detached_popen_kwargs,
     find_bash,
-    git_bash_path,
     kill_process_tree,
     pid_alive,
 )
@@ -71,10 +70,7 @@ def _save(jobs: Dict[str, Dict[str, Any]]) -> None:
 
 
 def _pid_alive(pid: Optional[int]) -> bool:
-    # Delegates to the platform-safe probe. NB: a bare os.kill(pid, 0) is unsafe
-    # on Windows — CPython routes it to TerminateProcess, which would KILL the
-    # job we're only trying to check. core.platform_compat.pid_alive handles
-    # both OSes correctly.
+    # Delegates to the platform-safe probe.
     return pid_alive(pid)
 
 
@@ -99,16 +95,14 @@ def launch(command: str, session_id: str, cwd: Optional[str] = None,
     # exit status.
     bash = find_bash()
     if bash:
-        # POSIX, or Windows with Git Bash/WSL. The user command goes in its OWN
-        # script file, run as a child `bash` — an `exit` inside it only ends
-        # that child (so the wrapper still records the exit code), and an
-        # unbalanced paren / trailing line-continuation in the command can't
-        # break the wrapper. `$?` is the child's real exit status. Paths are
-        # emitted as POSIX (forward-slash) + shell-quoted so Git Bash on Windows
-        # handles drive paths and spaces correctly.
+        # The user command goes in its own script file, run as a child `bash`.
+        # An `exit` inside it only ends that child (so the wrapper still records
+        # the exit code), and an unbalanced paren / trailing line-continuation
+        # in the command can't break the wrapper. `$?` is the child's real exit
+        # status.
         cmd_path = _JOBS_DIR / f"{job_id}.cmd.sh"
         cmd_path.write_text(command + "\n", encoding="utf-8")
-        lp, xp, cp = (shlex.quote(git_bash_path(p)) for p in (log_path, exit_path, cmd_path))
+        lp, xp, cp = (shlex.quote(str(p)) for p in (log_path, exit_path, cmd_path))
         script_path = _JOBS_DIR / f"{job_id}.sh"
         script_path.write_text(
             f"bash {cp} > {lp} 2>&1\n"
@@ -117,18 +111,8 @@ def launch(command: str, session_id: str, cwd: Optional[str] = None,
         )
         argv = [bash, str(script_path)]
     else:
-        # Windows without any bash installed: cmd.exe wrapper. The command runs
-        # in its own child .cmd so %ERRORLEVEL% is the command's real exit code.
-        child_path = _JOBS_DIR / f"{job_id}.child.cmd"
-        child_path.write_text("@echo off\r\n" + command + "\r\n", encoding="utf-8")
-        script_path = _JOBS_DIR / f"{job_id}.cmd"
-        script_path.write_text(
-            "@echo off\r\n"
-            f'call "{child_path}" > "{log_path}" 2>&1\r\n'
-            f'echo %ERRORLEVEL%> "{exit_path}"\r\n',
-            encoding="utf-8",
-        )
-        argv = [os.environ.get("ComSpec", "cmd.exe"), "/c", str(script_path)]
+        # Fallback: no bash found — use sh directly.
+        argv = ["sh", "-c", command]
 
     proc = subprocess.Popen(
         argv,

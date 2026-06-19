@@ -58,12 +58,9 @@ export const _MODELDIR_CHECK_OFF = '<svg width="13" height="13" viewBox="0 0 24 
 export const _MODELDIR_CHECK_ON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="8 12 11 15 16 9"/></svg>';
 
 // Monochrome platform glyphs (currentColor) for a server's OS tag: a penguin for
-// Linux, the four-pane logo for Windows, an Android robot for Termux/Android.
+// Linux, an Android robot for Termux/Android.
 function _platformIcon(platform) {
   const k = (platform || '').toLowerCase();
-  if (k === 'windows') {
-    return '<svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor" aria-hidden="true"><path d="M3 4.6l8-1.2v8.1H3V4.6zm9-1.3L21 2v9.5h-9V3.3zM3 12.5h8v8.1l-8-1.2v-6.9zm9 0h9V22l-9-1.3v-8.2z"/></svg>';
-  }
   if (k === 'termux' || k === 'android') {
     return '<svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor" aria-hidden="true"><path d="M7 9h10v6.6a1 1 0 0 1-1 1h-.7v2.6a1.15 1.15 0 1 1-2.3 0V16.6h-1.5v2.6a1.15 1.15 0 1 1-2.3 0V16.6H8a1 1 0 0 1-1-1V9zM4.3 9.1a1.15 1.15 0 0 1 2.3 0v4.6a1.15 1.15 0 1 1-2.3 0V9.1zm13.1 0a1.15 1.15 0 0 1 2.3 0v4.6a1.15 1.15 0 1 1-2.3 0V9.1zM8 8a4 4 0 0 1 8 0H8zm1.7-2.6-.8-1.2a.28.28 0 0 1 .47-.3l.83 1.25a4.8 4.8 0 0 1 3.66 0l.83-1.25a.28.28 0 0 1 .47.3L14.3 5.4M9.8 6.6a.62.62 0 1 0 0-1.24.62.62 0 0 0 0 1.24zm4.4 0a.62.62 0 1 0 0-1.24.62.62 0 0 0 0 1.24z"/></svg>';
   }
@@ -208,18 +205,13 @@ function _getPort(hostOrTask) {
   return srv?.port || '';
 }
 
-/** Get platform for a given host (or task object). Returns 'windows', 'termux', 'linux', or '' */
+/** Get platform for a given host (or task object). Returns 'termux', 'linux', or '' */
 export function _getPlatform(hostOrTask) {
   if (!hostOrTask) return _envState.platform || '';
   if (typeof hostOrTask === 'object') return hostOrTask.platform || _getPlatform(hostOrTask.remoteServerKey || hostOrTask.remoteHost);
   const selected = hostOrTask === _envState.remoteHost ? _selectedServer() : null;
   const srv = selected || _serverByVal(hostOrTask);
   return srv?.platform || '';
-}
-
-/** Check if the current active server is Windows */
-export function _isWindows(hostOrTask) {
-  return _getPlatform(hostOrTask) === 'windows';
 }
 
 /** Check if the detected (local) hardware is Apple Silicon / Metal. Keys off the
@@ -386,11 +378,6 @@ export function _detectBackend(model) {
     return { backend: 'llamacpp', label: 'llama.cpp' };
   }
 
-  // Windows → default to llama.cpp (no vLLM support on Windows)
-  if (_isWindows()) {
-    return { backend: 'llamacpp', label: 'llama.cpp' };
-  }
-
   // Apple Silicon (Metal) → llama.cpp (GGUF). vLLM/SGLang are CUDA/ROCm-only and
   // don't run on macOS; vLLM-native quantized models are already filtered out
   // of metal Cookbook results, so llama.cpp is always the right engine here.
@@ -415,12 +402,7 @@ export function _shellQuote(value) {
   return "'" + String(value ?? '').replace(/'/g, "'\\''") + "'";
 }
 
-export function _psQuote(value) {
-  return "'" + String(value ?? '').replace(/'/g, "''") + "'";
-}
-
 export function _buildEnvPrefix() {
-  if (_isWindows()) return _buildEnvPrefixWindows();
   let parts = [];
   if (_envState.env === 'venv' && _envState.envPath) {
     const p = _envState.envPath;
@@ -435,21 +417,6 @@ export function _buildEnvPrefix() {
   if (envVars.length) parts.push(envVars.join(' && '));
   if (parts.length === 0) return '';
   return parts.join(' && ') + ' &&';
-}
-
-function _buildEnvPrefixWindows() {
-  let parts = [];
-  if (_envState.env === 'venv' && _envState.envPath) {
-    const p = _envState.envPath;
-    const activate = p.endsWith('\\Scripts\\Activate.ps1') ? p : p + '\\Scripts\\Activate.ps1';
-    parts.push('& ' + _psQuote(activate));
-  } else if (_envState.env === 'conda' && _envState.envPath) {
-    parts.push('conda activate ' + _psQuote(_envState.envPath));
-  }
-  if (_envState.hfToken) parts.push('$env:HF_TOKEN=' + _psQuote(_envState.hfToken));
-  if (_envState.gpus) parts.push('$env:CUDA_VISIBLE_DEVICES=' + _psQuote(_envState.gpus));
-  if (parts.length === 0) return '';
-  return parts.join('; ') + ';';
 }
 
 export function _buildServeCmd(f, modelName, backend) {
@@ -532,25 +499,21 @@ export function _buildServeCmd(f, modelName, backend) {
     // GPU list — read from gpus (button strip); fall back to gpu_id for
     // backward-compat with older saved presets that pre-date the removal.
     const gpuId = (f.gpus || f.gpu_id || '').toString().trim();
-    const py = _isWindows() ? 'python' : 'python3';
+    const py = 'python3';
     // CPU-only serve (-ngl 0): drop the GPU-only flags, otherwise the command
     // mixes "zero GPU layers" with CUDA unified-memory + flash-attn and fails to
     // start (issue #1291). Only affects the ngl=0 path; GPU serving is unchanged.
     const _cpuOnly = String(f.ngl).trim() === '0';
     const lcPrefix = (() => {
       let p = '';
-      if (f.unified_mem && !_cpuOnly && !_isWindows()) p += `GGML_CUDA_ENABLE_UNIFIED_MEMORY=1 `;
-      if (gpuId && !_isWindows()) p += `CUDA_VISIBLE_DEVICES=${gpuId} `;
+      if (f.unified_mem && !_cpuOnly) p += `GGML_CUDA_ENABLE_UNIFIED_MEMORY=1 `;
+      if (gpuId) p += `CUDA_VISIBLE_DEVICES=${gpuId} `;
       return p;
     })();
-    if (f.unified_mem && !_cpuOnly && _isWindows()) cmd += `$env:GGML_CUDA_ENABLE_UNIFIED_MEMORY="1"; `;
-    if (gpuId && _isWindows()) cmd += `$env:CUDA_VISIBLE_DEVICES="${gpuId}"; `;
-    if (!_isWindows()) {
-      // Resolve GGUF path once, fail loudly if nothing matched (prevents
-      // `--model ""` which causes confusing downstream errors).
-      cmd += `MODEL_FILE=${ggufPath} && { [ -n "$MODEL_FILE" ] && [ -f "$MODEL_FILE" ]; } || { echo "ERROR: No GGUF found on this host. Either download the model here, or switch to the server where it's cached."; exit 1; } && `;
-    }
-    const modelArg = _isWindows() ? `"${ggufPath}"` : `"$MODEL_FILE"`;
+    // Resolve GGUF path once, fail loudly if nothing matched (prevents
+    // `--model ""` which causes confusing downstream errors).
+    cmd += `MODEL_FILE=${ggufPath} && { [ -n "$MODEL_FILE" ] && [ -f "$MODEL_FILE" ]; } || { echo "ERROR: No GGUF found on this host. Either download the model here, or switch to the server where it's cached."; exit 1; } && `;
+    const modelArg = `"$MODEL_FILE"`;
     // Prefer the native llama-server binary on Linux — its minja templating
     // renders modern GGUF chat templates that the Python bindings' Jinja2
     // rejects (do_tojson ensure_ascii). Fall back to llama_cpp.server.
@@ -614,12 +577,8 @@ export function _buildServeCmd(f, modelName, backend) {
       _lcpExtra += ` --clip_model_path "${f._mmproj_path}"`;
     }
     const _lcpServer = `${lcPrefix}${py} -m llama_cpp.server --model ${modelArg} --host 0.0.0.0 --port ${f.port || '8080'} --n_gpu_layers ${f.ngl || '99'} --n_ctx ${f.ctx || '8192'}${_lcpExtra}`;
-    if (_isWindows()) {
-      cmd += _lcpServer;
-    } else {
-      cmd += `${lcPrefix}llama-server --model ${modelArg} --host 0.0.0.0 --port ${f.port || '8080'} -ngl ${f.ngl || '99'} -c ${f.ctx || '8192'}${_lcExtra}`;
-      cmd += ` || ${_lcpServer}`;
-    }
+    cmd += `${lcPrefix}llama-server --model ${modelArg} --host 0.0.0.0 --port ${f.port || '8080'} -ngl ${f.ngl || '99'} -c ${f.ctx || '8192'}${_lcExtra}`;
+    cmd += ` || ${_lcpServer}`;
   } else if (backend === 'ollama') {
     const ollamaPort = f.port || '11434';
     // GGUF + Ollama: delegate to the iGPU-bound ollama-test container via
@@ -653,7 +612,7 @@ export function _buildServeCmd(f, modelName, backend) {
   } else if (backend === 'diffusers') {
     const gpuStr = f.gpus?.trim();
     if (gpuStr) cmd += `CUDA_VISIBLE_DEVICES=${gpuStr} `;
-    const diffusersPy = _isWindows() ? 'python' : _py3Bin;
+    const diffusersPy = _py3Bin;
     cmd += `${diffusersPy} scripts/diffusion_server.py --model ${modelName} --port ${f.port || '8100'}`;
     if (f.diff_dtype && f.diff_dtype !== 'bfloat16') cmd += ` --dtype ${f.diff_dtype}`;
     if (f.diff_device_map && f.diff_device_map !== 'balanced') cmd += ` --device-map ${f.diff_device_map}`;
@@ -775,10 +734,7 @@ async function _fetchDependencies() {
     const data = await resp.json();
     const pkgs = data.packages || [];
     if (!pkgs.length) { list.innerHTML = '<div class="hwfit-loading">No packages found</div>'; return; }
-    const _winUnsupported = new Set(['hf_transfer', 'vllm', 'rembg', 'gfpgan']);
-
-    const _statusTag = (pkg, isLocal, isSystemDep, winBlocked) => {
-      if (winBlocked) return `<span class="cookbook-dep-tag cookbook-dep-na">N/A</span>`;
+    const _statusTag = (pkg, isLocal, isSystemDep) => {
       if (pkg.installed && isSystemDep) return `<span class="cookbook-dep-tag cookbook-dep-installed" title="Found on selected server">Installed</span>`;
       if (pkg.installed && pkg.pip_update_available === false) {
         const tip = esc(pkg.update_note || pkg.status_note || 'Found externally; update outside Odysseus.');
@@ -812,7 +768,6 @@ async function _fetchDependencies() {
     const _depRow = (pkg) => {
       const isLocal = pkg.target === 'local';
       const isSystemDep = pkg.kind === 'system';
-      const winBlocked = !isLocal && _isWindows() && _winUnsupported.has(pkg.name);
       const note = pkg.status_note ? `<div class="memory-item-meta" style="font-size:10px;opacity:0.65;margin-top:3px;">${esc(pkg.status_note)}</div>` : '';
       const updateNote = pkg.installed && pkg.pip_update_available === false && pkg.update_note ? `<div class="memory-item-meta" style="font-size:10px;opacity:0.55;margin-top:3px;">${esc(pkg.update_note)}</div>` : '';
       // Inline rebuild/reinstall tag. Styled as a .cookbook-dep-tag so it
@@ -836,7 +791,7 @@ async function _fetchDependencies() {
         ? `<button class="cookbook-dep-tag cookbook-dep-recipe-caret" data-dep-recipe-toggle="${esc(pkg.name)}" title="Pick a model to see the exact install commands" aria-expanded="false" style="background:none;border:1px solid var(--border);padding:2px 6px;display:inline-flex;align-items:center;cursor:pointer;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="transition:transform 0.15s"><polyline points="6 9 12 15 18 9"/></svg></button>`
         : '';
       const recipePanel = hasRecipe ? _recipePanelHtml(pkg.name) : '';
-      return `<div class="cookbook-dep-row${winBlocked ? ' cookbook-dep-blocked' : ''}" data-pkg-name="${esc(pkg.name)}" data-dep-pip="${esc(pkg.pip || '')}" data-dep-target="${isLocal ? 'local' : 'remote'}" data-dep-kind="${esc(pkg.kind || 'python')}">`
+      return `<div class="cookbook-dep-row" data-pkg-name="${esc(pkg.name)}" data-dep-pip="${esc(pkg.pip || '')}" data-dep-target="${isLocal ? 'local' : 'remote'}" data-dep-kind="${esc(pkg.kind || 'python')}">`
         + `<div class="cookbook-dep-info">`
         + `<div class="memory-item-title">${_depGlyphHtml(pkg.name)}${esc(pkg.name)}</div>`
         + `<div class="memory-item-meta" style="font-size:10px;opacity:0.5;margin-top:2px;">${esc(pkg.desc)}</div>`
@@ -845,7 +800,7 @@ async function _fetchDependencies() {
         + `</div>`
         + _rebuildBtn
         + `<span class="cookbook-dep-tag cookbook-dep-cat">${esc(pkg.category)}</span>`
-        + _statusTag(pkg, isLocal, isSystemDep, winBlocked)
+        + _statusTag(pkg, isLocal, isSystemDep)
         + recipeCaret
         + `</div>`
         + recipePanel;
@@ -938,34 +893,24 @@ async function _fetchDependencies() {
       // only add `--user --break-system-packages` when there's no env —
       // for PEP-668-locked system pythons (Arch, newer Debian).
       const _inEnv = _envState.env === 'venv' || _envState.env === 'conda';
-      const _pipFlags = (!_isWindows() && !_inEnv) ? ' --user --break-system-packages' : '';
+      const _pipFlags = !_inEnv ? ' --user --break-system-packages' : '';
       // Use the venv's python3 by absolute path when configured. Even with the
       // env_prefix sourcing activate, SSH non-interactive sessions sometimes
       // pick a `python3` ahead of the venv's bin on PATH, so the install
       // silently lands in the wrong site-packages.
       let _py;
-      if (_isWindows()) {
-        _py = 'python';
-      } else if (_envState.env === 'venv' && _envState.envPath) {
+      if (_envState.env === 'venv' && _envState.envPath) {
         _py = `${_envState.envPath.replace(/\/+$/, '')}/bin/python3`;
       } else {
         _py = 'python3';
       }
       const cmd = `${_py} -m pip install${upgrade ? ' -U' : ''}${_pipFlags} "${pipName}"`;
       let envPrefix = '';
-      if (_isWindows()) {
-        if (_envState.env === 'venv' && _envState.envPath) {
-          envPrefix = '& ' + _psQuote(_envState.envPath.endsWith('\\Scripts\\Activate.ps1') ? _envState.envPath : _envState.envPath + '\\Scripts\\Activate.ps1');
-        } else if (_envState.env === 'conda' && _envState.envPath) {
-          envPrefix = 'conda activate ' + _psQuote(_envState.envPath);
-        }
-      } else {
-        if (_envState.env === 'venv' && _envState.envPath) {
-          const p = _envState.envPath;
-          envPrefix = 'source ' + _shellQuote(p.endsWith('/bin/activate') ? p : p + '/bin/activate');
-        } else if (_envState.env === 'conda' && _envState.envPath) {
-          envPrefix = 'eval "$(conda shell.bash hook)" && conda activate ' + _shellQuote(_envState.envPath);
-        }
+      if (_envState.env === 'venv' && _envState.envPath) {
+        const p = _envState.envPath;
+        envPrefix = 'source ' + _shellQuote(p.endsWith('/bin/activate') ? p : p + '/bin/activate');
+      } else if (_envState.env === 'conda' && _envState.envPath) {
+        envPrefix = 'eval "$(conda shell.bash hook)" && conda activate ' + _shellQuote(_envState.envPath);
       }
       try {
         const reqBody = {
@@ -1636,19 +1581,11 @@ function _wireTabEvents(body) {
       if (host) { payload.remote_host = host; const _sp3 = _getPort(host); if (_sp3) payload.ssh_port = _sp3; }
       const srvPlatform = _getPlatform(host);
       if (srvPlatform) payload.platform = srvPlatform;
-      if (srvPlatform === 'windows') {
-        if (env === 'venv' && envPath) {
-          payload.env_prefix = '& ' + _psQuote(envPath.endsWith('\\Scripts\\Activate.ps1') ? envPath : envPath + '\\Scripts\\Activate.ps1');
-        } else if (env === 'conda' && envPath) {
-          payload.env_prefix = 'conda activate ' + _psQuote(envPath);
-        }
-      } else {
-        if (env === 'venv' && envPath) {
-          const p = envPath;
-          payload.env_prefix = 'source ' + _shellQuote(p.endsWith('/bin/activate') ? p : p + '/bin/activate');
-        } else if (env === 'conda' && envPath) {
-          payload.env_prefix = 'eval "$(conda shell.bash hook)" && conda activate ' + _shellQuote(envPath);
-        }
+      if (env === 'venv' && envPath) {
+        const p = envPath;
+        payload.env_prefix = 'source ' + _shellQuote(p.endsWith('/bin/activate') ? p : p + '/bin/activate');
+      } else if (env === 'conda' && envPath) {
+        payload.env_prefix = 'eval "$(conda shell.bash hook)" && conda activate ' + _shellQuote(envPath);
       }
       const shortName = repo.split('/').pop();
       _retryDownload(shortName, payload);
@@ -2020,7 +1957,7 @@ export function _serverEntryHtml(s, i, defaultServer, forceRemote, isNew) {
   html += `<input type="text" class="hwfit-sf cookbook-srv-host" value="${isLocal ? '' : esc(s.host || '')}" placeholder="e.g. user@ip" style="width:214.5px;flex-shrink:0;box-sizing:border-box;" ${isLocal ? 'readonly' : ''} />`;
   html += `<input type="text" class="hwfit-sf cookbook-srv-port" value="${esc(s.port || '')}" placeholder="Port" title="SSH port (default 22)" style="width:48px;flex-shrink:0;" ${isLocal ? 'readonly' : ''} />`;
   html += `<select class="hwfit-sf cookbook-srv-env">${envOpts}</select>`;
-  html += `<input type="text" class="hwfit-sf cookbook-srv-path" value="${esc(s.envPath || '')}" placeholder="${s.platform === 'windows' ? 'venv path' : '~/venv'}" />`;
+  html += `<input type="text" class="hwfit-sf cookbook-srv-path" value="${esc(s.envPath || '')}" placeholder="~/venv" />`;
   html += `<span class="cookbook-dep-tag cookbook-dep-target" style="font-size:8px;flex-shrink:0;min-width:46px;text-align:center;visibility:hidden;">placeholder</span>`;
   html += `<span class="cookbook-srv-actions" style="display:inline-flex;gap:4px;align-items:center;width:78px;flex-shrink:0;justify-content:flex-end;"></span>`;
   html += `</div>`;
@@ -2581,12 +2518,10 @@ const shared = {
   _serverByVal,
   _selectedServer,
   _getPlatform,
-  _isWindows,
   _isMetal,
   _buildEnvPrefix,
   _buildServeCmd,
   _shellQuote,
-  _psQuote,
   _detectBackend,
   _detectToolParser,
   _detectModelOptimizations,

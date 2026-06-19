@@ -114,12 +114,6 @@ def test_secret_storage_key_created_with_safe_mode(tmp_path, monkeypatch):
 
 # ── secure-by-default deployment + integration storage ─────────
 
-def test_docker_compose_binds_web_ui_to_loopback_by_default():
-    compose = Path("docker-compose.yml").read_text(encoding="utf-8")
-    assert "${APP_BIND:-127.0.0.1}:${APP_PORT:-7000}:7000" in compose
-    assert '"${APP_PORT:-7000}:7000"' not in compose
-
-
 def test_readme_native_quickstart_uses_loopback():
     # The README refresh (#4306) moved the native quickstart into docs/setup.md,
     # so accept the loopback guidance from either the README or the setup guide.

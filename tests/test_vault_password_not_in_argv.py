@@ -37,7 +37,6 @@ if "core.middleware" not in sys.modules:
     sys.modules["core.middleware"] = _mw
 if "core.platform_compat" not in sys.modules:
     _pc = types.ModuleType("core.platform_compat")
-    _pc.IS_WINDOWS = False
     _pc.safe_chmod = MagicMock()
     _pc.which_tool = MagicMock(return_value="bw")
     sys.modules["core.platform_compat"] = _pc

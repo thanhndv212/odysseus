@@ -39,17 +39,15 @@ The full license texts are kept in [`licenses/`](licenses/).
 
 ---
 
-## Bundled via Docker Compose
+## Bundled services
 
-These services are pulled as images by the project's `docker-compose.yml`
-and run alongside Odysseus on `docker compose up`. They are not modified —
-just composed.
+These services run alongside Odysseus and may be integrated at runtime:
 
-| Service | Image | Purpose | License |
-|---|---|---|---|
-| [SearXNG](https://github.com/searxng/searxng) | `searxng/searxng:2026.5.31-7159b8aed` (pinned tag; see compose) | Default metasearch backend | AGPL-3.0 |
-| [ChromaDB](https://github.com/chroma-core/chroma) | `chromadb/chroma:latest` | Vector store for memory / RAG | Apache-2.0 |
-| [ntfy](https://github.com/binwiederhier/ntfy) | `binwiederhier/ntfy` | Push notifications (self-hosted reminders) | Apache-2.0 / GPL-2.0 |
+| Service | Purpose | License |
+|---|---|---|
+| [SearXNG](https://github.com/searxng/searxng) | Default metasearch backend | AGPL-3.0 |
+| [ChromaDB](https://github.com/chroma-core/chroma) | Vector store for memory / RAG | Apache-2.0 |
+| [ntfy](https://github.com/binwiederhier/ntfy) | Push notifications (self-hosted reminders) | Apache-2.0 / GPL-2.0 |
 
 ## Bundled front-end libraries
 

@@ -22,16 +22,7 @@ End-users cloning the repo will land on `dev` by default. To run the curated/sta
 
 ## Setup
 
-Docker is the recommended path for normal testing:
-
-```bash
-git clone https://github.com/pewdiepie-archdaemon/odysseus.git
-cd odysseus
-cp .env.example .env
-docker compose up -d --build
-```
-
-Manual development uses Python 3.11+:
+Development uses Python 3.11+:
 
 ```bash
 python3 -m venv venv
@@ -40,7 +31,6 @@ pip install -r requirements.txt
 python -m uvicorn app:app --host 127.0.0.1 --port 7000
 ```
 
-Windows is not actively tested. Docker on Linux or a Linux/macOS manual install is the safer path for now.
 
 ## Running Checks
 
@@ -50,14 +40,6 @@ Run the smallest relevant checks for your change:
 python -m pytest
 python -m py_compile app.py routes/*.py src/*.py
 node --check static/js/<file-you-changed>.js
-```
-
-For Docker-related changes:
-
-```bash
-docker compose config
-docker compose up -d --build
-docker compose logs --tail=120 odysseus
 ```
 
 Mention what you ran in the pull request description. If you could not run a check, say so.
@@ -98,7 +80,7 @@ If you are unsure whether a change is "visual," it is. Default to attaching a sc
 
 Don't hardcode values that the project already exposes through a constant or a helper. Hardcoded literals drift out of sync, break on non-default deployments, and reintroduce bugs we've already fixed.
 
-- **Filesystem paths:** never build writable paths from `Path(__file__)...` into the source tree, hardcode `/app/...`, or use a relative `"data/..."` string. Every persisted file and directory has a named constant in `src/constants.py` (for example `AUTH_FILE`, `USER_PREFS_FILE`, `SETTINGS_FILE`, `TTS_CACHE_DIR`, `CHROMA_DIR`). Import and use that named constant; do not re-derive the path locally with `os.path.join(DATA_DIR, "x.json")` or `DATA_DIR / "x.json"`. `DATA_DIR` is the single place that reads `ODYSSEUS_DATA_DIR`, so use it directly only for dynamic paths that have no fixed name (for example per-owner files). If a data file or directory has no constant yet, add one to `src/constants.py`. The source tree is read-only in Docker and `/app/...` does not exist on native runs; guard directory creation so an unwritable path degrades gracefully instead of crashing at import.
+- **Filesystem paths:** never build writable paths from `Path(__file__)...` into the source tree, hardcode `/app/...`, or use a relative `"data/..."` string. Every persisted file and directory has a named constant in `src/constants.py` (for example `AUTH_FILE`, `USER_PREFS_FILE`, `SETTINGS_FILE`, `TTS_CACHE_DIR`, `CHROMA_DIR`). Import and use that named constant; do not re-derive the path locally with `os.path.join(DATA_DIR, "x.json")` or `DATA_DIR / "x.json"`. `DATA_DIR` is the single place that reads `ODYSSEUS_DATA_DIR`, so use it directly only for dynamic paths that have no fixed name (for example per-owner files). If a data file or directory has no constant yet, add one to `src/constants.py`. The source tree should be treated as read-only at runtime; guard directory creation so an unwritable path degrades gracefully instead of crashing at import.
 - **Internal API / loopback URLs:** don't hardcode `http://localhost:7000`. Use `internal_api_base()` from `src.constants` (it honors `ODYSSEUS_INTERNAL_BASE` / `APP_PORT`).
 - **Ports, limits, model lists, and similar:** reuse the existing constant if one exists; if it doesn't and the value is used in more than one place, add a constant rather than copying the literal.
 
@@ -110,7 +92,7 @@ If you need a value that has no constant or helper yet, add it to `src/constants
 
 For bugs, include:
 
-- Install method: Docker, manual Python, WSL, etc.
+- Install method: manual Python, macOS native.
 - OS, browser, and device if relevant.
 - Exact steps to reproduce.
 - Expected behavior and actual behavior.

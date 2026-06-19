@@ -13,37 +13,18 @@ import shutil
 import subprocess
 import sys
 
-from core.platform_compat import IS_WINDOWS, which_tool
+from core.platform_compat import which_tool
 from src.runtime_paths import get_app_root
 
 logger = logging.getLogger(__name__)
 
 
 def _find_npx() -> str:
-    """Find the npx binary, checking common locations if not on PATH.
-
-    On Windows the shim is `npx.cmd`, which `which_tool` resolves via PATHEXT.
-    """
+    """Find the npx binary, checking common locations if not on PATH."""
     npx = which_tool("npx")
     if npx:
         return npx
-    if IS_WINDOWS:
-        # Minimal-PATH fallbacks: npm's global bin lives under %APPDATA%\npm,
-        # and node's installer dir carries npx.cmd alongside node.exe.
-        appdata = os.environ.get("APPDATA", os.path.expanduser("~"))
-        for candidate in (
-            os.path.join(appdata, "npm", "npx.cmd"),
-            r"C:\Program Files\nodejs\npx.cmd",
-        ):
-            if os.path.isfile(candidate):
-                return candidate
-        node = which_tool("node")
-        if node:
-            cand = os.path.join(os.path.dirname(node), "npx.cmd")
-            if os.path.isfile(cand):
-                return cand
-        return "npx.cmd"  # fallback, will fail with a clear error
-    # Common POSIX locations when PATH is minimal (e.g. systemd)
+    # Common locations when PATH is minimal (e.g. systemd, launchd)
     for candidate in [
         os.path.expanduser("~/.npm-global/bin/npx"),
         os.path.expanduser("~/.local/bin/npx"),

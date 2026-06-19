@@ -248,7 +248,6 @@ let _sshCmd;
 let _getPort;
 let _sshPrefix;
 let _getPlatform;
-let _isWindows;
 let _buildEnvPrefix;
 let _loadPresets;
 let _savePresets;
@@ -762,70 +761,18 @@ function _animateOutThenRemove(el, sessionId) {
   setTimeout(() => _removeTask(sessionId), 360);
 }
 
-// ── tmux / Windows session commands ──
+// ── tmux session commands ──
 
 export function _tmuxCmd(task, tmuxArgs) {
-  if (_isWindows(task)) {
-    return _winSessionCmd(task, tmuxArgs);
-  }
   if (task.remoteHost) {
     return `ssh ${_sshPrefix(_getPort(task))}${task.remoteHost} 'tmux ${tmuxArgs}' 2>/dev/null`;
   }
   return `tmux ${tmuxArgs} 2>/dev/null`;
 }
 
-function _winSessionCmd(task, tmuxArgs) {
-  const host = task.remoteHost;
-  const sd = host ? '$env:TEMP\\odysseus-sessions' : '$env:TEMP\\odysseus-tmux';
-  const sid = task.sessionId;
-  const pf = _sshPrefix(_getPort(task));
-  if (tmuxArgs.includes('capture-pane')) {
-    const lines = tmuxArgs.match(/-S\s*-?(\d+)/)?.[1] || '200';
-    const ps = host
-      ? `Get-Content '${sd}\\${sid}.log' -Tail ${lines} -ErrorAction SilentlyContinue`
-      : `Get-Content (Join-Path $env:TEMP 'odysseus-tmux\\${sid}.log') -Tail ${lines} -ErrorAction SilentlyContinue`;
-    return _winPowerShellCmd(task, ps);
-  }
-  if (tmuxArgs.includes('has-session')) {
-    const ps = host
-      ? `$p = Get-Content '${sd}\\${sid}.pid' -ErrorAction SilentlyContinue; if ($p) { Get-Process -Id $p -ErrorAction SilentlyContinue | Out-Null; if ($?) { exit 0 } else { exit 1 } } else { exit 1 }`
-      : `$p = Get-Content (Join-Path $env:TEMP 'odysseus-tmux\\${sid}.pid') -ErrorAction SilentlyContinue; if ($p) { Get-Process -Id $p -ErrorAction SilentlyContinue | Out-Null; if ($?) { exit 0 } else { exit 1 } } else { exit 1 }`;
-    return _winPowerShellCmd(task, ps);
-  }
-  if (tmuxArgs.includes('kill-session')) {
-    const ps = _winSessionStopTreePs(task);
-    return _winPowerShellCmd(task, ps);
-  }
-  if (tmuxArgs.includes('send-keys') && tmuxArgs.includes('C-c')) {
-    const ps = host
-      ? `$p = Get-Content '${sd}\\${sid}.pid' -ErrorAction SilentlyContinue; if ($p) { Stop-Process -Id $p -ErrorAction SilentlyContinue }`
-      : `$p = Get-Content (Join-Path $env:TEMP 'odysseus-tmux\\${sid}.pid') -ErrorAction SilentlyContinue; if ($p) { Stop-Process -Id $p -ErrorAction SilentlyContinue }`;
-    return _winPowerShellCmd(task, ps);
-  }
-  return host ? `ssh ${pf}${host} 'tmux ${tmuxArgs}' 2>/dev/null` : `tmux ${tmuxArgs} 2>/dev/null`;
-}
 
-function _winPowerShellCmd(task, ps) {
-  const command = `powershell -Command "${ps}"`;
-  if (!task.remoteHost) return command;
-  return `ssh ${_sshPrefix(_getPort(task))}${task.remoteHost} ${_shQuote(command)}`;
-}
-
-function _winSessionStopTreePs(task) {
-  const host = task.remoteHost;
-  const sd = host ? '$env:TEMP\\odysseus-sessions' : '$env:TEMP\\odysseus-tmux';
-  const sid = task.sessionId;
-  const stopTree = `function Stop-Tree([int]$Id) { Get-CimInstance Win32_Process -Filter ('ParentProcessId = ' + $Id) -ErrorAction SilentlyContinue | ForEach-Object { Stop-Tree ([int]$_.ProcessId) }; Stop-Process -Id $Id -Force -ErrorAction SilentlyContinue }`;
-  return host
-    ? `${stopTree}; $p = Get-Content '${sd}\\${sid}.pid' -ErrorAction SilentlyContinue; if ($p -match '^\\d+$') { Stop-Tree ([int]$p) }; Remove-Item '${sd}\\${sid}.*' -Force -ErrorAction SilentlyContinue`
-    : `${stopTree}; $p = Get-Content (Join-Path $env:TEMP 'odysseus-tmux\\${sid}.pid') -ErrorAction SilentlyContinue; if ($p -match '^\\d+$') { Stop-Tree ([int]$p) }; Remove-Item (Join-Path $env:TEMP 'odysseus-tmux\\${sid}.*') -Force -ErrorAction SilentlyContinue`;
-}
 
 export function _tmuxGracefulKill(task) {
-  if (_isWindows(task)) {
-    const ps = _winSessionStopTreePs(task);
-    return _winPowerShellCmd(task, ps);
-  }
   if (task.remoteHost) {
     return `ssh ${_sshPrefix(_getPort(task))}${task.remoteHost} 'tmux send-keys -t ${task.sessionId} C-c 2>/dev/null; sleep 2; tmux kill-session -t ${task.sessionId} 2>/dev/null'`;
   }
@@ -837,11 +784,6 @@ export function _tmuxGracefulKill(task) {
 // still detected — vLLM sometimes ignores SIGINT during model init, and a
 // stuck CUDA context can survive `tmux kill-session` alone.
 export function _tmuxForceKill(task) {
-  if (_isWindows(task)) {
-    // Windows graceful path already does Stop-Process -Force, so the same
-    // command serves as the "force" variant.
-    return _tmuxGracefulKill(task);
-  }
   const sid = task.sessionId;
   const inner =
     `PIDS=$(tmux list-panes -t ${sid} -F "#{pane_pid}" 2>/dev/null); ` +
@@ -862,10 +804,6 @@ export function _tmuxForceKill(task) {
 // exists (or its main PID is still listed in /proc), "DEAD" otherwise.
 // Used by the Stop-all escalation to decide whether to force-kill.
 export function _tmuxIsAliveCheck(task) {
-  if (_isWindows(task)) {
-    // Skip the check on Windows — the graceful path already force-kills.
-    return null;
-  }
   const sid = task.sessionId;
   const inner = `if tmux has-session -t ${sid} 2>/dev/null; then echo ALIVE; else echo DEAD; fi`;
   if (task.remoteHost) {
@@ -1564,19 +1502,11 @@ export async function _launchServeTask(shortName, repo, cmd, fields, hostOverrid
   const _usedEnvPath = _envState.envPath;
   const _usedGpus = _envState.gpus || '';
   let envPrefix = '';
-  if (_isWindows()) {
-    if (_envState.env === 'venv' && _envState.envPath) {
-      envPrefix = '& ' + (_envState.envPath.endsWith('\\Scripts\\Activate.ps1') ? _envState.envPath : _envState.envPath + '\\Scripts\\Activate.ps1');
-    } else if (_envState.env === 'conda' && _envState.envPath) {
-      envPrefix = 'conda activate ' + _envState.envPath;
-    }
-  } else {
-    if (_envState.env === 'venv' && _envState.envPath) {
-      const p = _envState.envPath;
-      envPrefix = 'source ' + (p.endsWith('/bin/activate') ? p : p + '/bin/activate');
-    } else if (_envState.env === 'conda' && _envState.envPath) {
-      envPrefix = 'eval "$(conda shell.bash hook)" && conda activate ' + _envState.envPath;
-    }
+  if (_envState.env === 'venv' && _envState.envPath) {
+    const p = _envState.envPath;
+    envPrefix = 'source ' + (p.endsWith('/bin/activate') ? p : p + '/bin/activate');
+  } else if (_envState.env === 'conda' && _envState.envPath) {
+    envPrefix = 'eval "$(conda shell.bash hook)" && conda activate ' + _envState.envPath;
   }
 
   const reqBody = {
@@ -2247,22 +2177,11 @@ export function _renderRunningTab() {
           }});
         }
         // ── Copy section ────────────────────────────────────────────
-        if (_isWindows(task)) {
-          const host = task.remoteHost;
-          const sd = host ? '$env:TEMP\\odysseus-sessions' : '$env:TEMP\\odysseus-tmux';
-          const logCmd = host
-            ? `ssh ${_sshPrefix(_getPort(task))}${host} "powershell -Command \\"Get-Content '${sd}\\${task.sessionId}.log' -Wait\\""`
-            : `powershell -Command "Get-Content (Join-Path $env:TEMP 'odysseus-tmux\\${task.sessionId}.log') -Wait"`;
-          items.push({ group: 'copy', label: 'Copy log cmd', action: 'copy-tmux', custom: () => {
-            _copyText(logCmd);
-          }});
-        } else {
-          // Just the tmux command itself — no ssh wrapper.
-          const tmuxAttach = `tmux attach -t ${task.sessionId}`;
-          items.push({ group: 'copy', label: 'Copy tmux', action: 'copy-tmux', custom: () => {
-            _copyText(tmuxAttach);
-          }});
-        }
+        // Just the tmux command itself — no ssh wrapper.
+        const tmuxAttach = `tmux attach -t ${task.sessionId}`;
+        items.push({ group: 'copy', label: 'Copy tmux', action: 'copy-tmux', custom: () => {
+          _copyText(tmuxAttach);
+        }});
         if (_shouldOfferCrashReport(task)) {
           items.push({ group: 'copy', label: 'Copy crash report', action: 'copy-crash-report', custom: () => {
             const out = (el.querySelector('.cookbook-output-pre')?.textContent || task.output || '');
@@ -3790,7 +3709,6 @@ export function initRunning(shared) {
   _getPort = shared._getPort;
   _sshPrefix = shared._sshPrefix;
   _getPlatform = shared._getPlatform;
-  _isWindows = shared._isWindows;
   _buildEnvPrefix = shared._buildEnvPrefix;
   _loadPresets = shared._loadPresets;
   _savePresets = shared._savePresets;

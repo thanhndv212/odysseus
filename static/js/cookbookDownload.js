@@ -13,7 +13,6 @@ let _sshCmd;
 let _getPort;
 let _getPlatform;
 let _serverByVal;
-let _isWindows;
 let _buildEnvPrefix;
 let _buildServeCmd;
 let _detectBackend;
@@ -99,9 +98,6 @@ function _bashQuote(value) {
 
 function _missingGgufCommand(model) {
   const msg = _missingGgufMessage(model);
-  if (_isWindows()) {
-    return `Write-Error ${JSON.stringify(msg)}; exit 1`;
-  }
   return `printf '%s\\n' ${_bashQuote(msg)} >&2; exit 1`;
 }
 
@@ -121,7 +117,7 @@ export function _buildDownloadCmd(model, backend) {
       // download path built server-side). '' = default HF cache.
       const _dlDir = (_serverByVal?.(_envState.remoteServerKey || _envState.remoteHost || '') || {}).downloadDir || '';
       const _localDirArg = _dlDir ? `, local_dir=os.path.expanduser('${_dlDir.replace(/\/$/, '')}/${repo.split('/').pop()}')` : '';
-      const _py = _isWindows() ? 'python' : 'python3';
+      const _py = 'python3';
       cmd = `${_py} -u -c "
 import sys, time, os
 os.environ['HF_HUB_DISABLE_PROGRESS_BARS']='0'
@@ -490,8 +486,6 @@ export async function _runModelDownload(panel, model, backend, hostOverride) {
   const env = host ? (srv.env || 'none') : (_envState.env || 'none');
   const envPath = host ? (srv.envPath || '') : (_envState.envPath || '');
   const platform = host ? (srv.platform || '') : (_envState.platform || '');
-  const isWin = host ? (platform === 'windows') : _isWindows();
-
   const payload = { repo_id: repo, backend };
   if (include) payload.include = include;
   // Large downloads are where hf_transfer most often dies near the end. Use the
@@ -504,18 +498,10 @@ export async function _runModelDownload(panel, model, backend, hostOverride) {
   // If this server has a directory flagged as the download target, send it so
   // the backend downloads into <dir>/<model> instead of the default HF cache.
   if (srv.downloadDir) payload.local_dir = srv.downloadDir;
-  if (isWin) {
-    if (env === 'venv' && envPath) {
-      payload.env_prefix = '& ' + (envPath.endsWith('\\Scripts\\Activate.ps1') ? envPath : envPath + '\\Scripts\\Activate.ps1');
-    } else if (env === 'conda' && envPath) {
-      payload.env_prefix = 'conda activate ' + envPath;
-    }
-  } else {
-    if (env === 'venv' && envPath) {
-      payload.env_prefix = 'source ' + (envPath.endsWith('/bin/activate') ? envPath : envPath + '/bin/activate');
-    } else if (env === 'conda' && envPath) {
-      payload.env_prefix = 'eval "$(conda shell.bash hook)" && conda activate ' + envPath;
-    }
+  if (env === 'venv' && envPath) {
+    payload.env_prefix = 'source ' + (envPath.endsWith('/bin/activate') ? envPath : envPath + '/bin/activate');
+  } else if (env === 'conda' && envPath) {
+    payload.env_prefix = 'eval "$(conda shell.bash hook)" && conda activate ' + envPath;
   }
 
   const shortName = (model.name || repo).split('/').pop();
@@ -616,7 +602,6 @@ export function initDownload(shared) {
   _getPort = shared._getPort;
   _getPlatform = shared._getPlatform;
   _serverByVal = shared._serverByVal;
-  _isWindows = shared._isWindows;
   _buildEnvPrefix = shared._buildEnvPrefix;
   _buildServeCmd = shared._buildServeCmd;
   _detectBackend = shared._detectBackend;
