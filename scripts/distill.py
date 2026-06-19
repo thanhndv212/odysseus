@@ -164,6 +164,7 @@ def main() -> int:
         print(f"Distilling {len(batch)} sessions{' (mock)' if args.mock else ''}...\n")
 
         total_memories = 0
+        errors = 0
         for i, s in enumerate(batch, 1):
             print(f"[{i}/{len(batch)}] {s['title'] or 'untitled'}")
             print(f"  File: {s['file_path']}")
@@ -173,11 +174,15 @@ def main() -> int:
             )
             _print_result(result)
             total_memories += result.get("memories_extracted", 0)
+            if result.get("skipped") and result.get("reason") == "llm_error":
+                errors += 1
             print()
 
         print(f"=== Batch Complete ===")
         print(f"Sessions processed: {len(batch)}")
         print(f"Total memories extracted: {total_memories}")
+        if errors > 0:
+            print(f"LLM errors (skipped): {errors}")
         remaining = len(sessions) - len(batch)
         if remaining > 0:
             print(f"Remaining: {remaining} sessions (run again to continue)")

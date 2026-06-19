@@ -328,13 +328,24 @@ def distill_session(
             confidence=0.5,
         )
     else:
-        client, model = get_llm_client()
-        knowledge = client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            response_model=DistilledKnowledge,
-            max_tokens=2000,
-        )
+        try:
+            client, model = get_llm_client()
+            knowledge = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                response_model=DistilledKnowledge,
+                max_tokens=4000,
+            )
+        except Exception as e:
+            # Log failed session and skip — don't crash the batch
+            result = {
+                "skipped": True,
+                "reason": "llm_error",
+                "error": str(e)[:200],
+                "message_count": len(data.messages),
+            }
+            update_distillation_log(log_path, data.session.id, csf_path, result)
+            return result
 
     # Convert to memory entries
     memories = distill_to_memories(knowledge, data.session.id, directory=data.session.directory, owner=owner)
