@@ -1498,8 +1498,10 @@ function initializeEventListeners() {
   if (toolMemoryBtn && memoryModal) {
     toolMemoryBtn.addEventListener('click', () => {
       memoryModal.classList.remove('hidden');
-      if (memoryModule && memoryModule.renderMemoryList) memoryModule.renderMemoryList();
-      if (memoryModule && memoryModule.updateMemoryCount) memoryModule.updateMemoryCount();
+      if (memoryModule && memoryModule.renderMemoryList) {
+        memoryModule.resetRenderLimit();
+        memoryModule.renderMemoryList();
+      }
     });
   }
 
@@ -1510,10 +1512,11 @@ function initializeEventListeners() {
   
   const memorySearchInput = el('memory-search');
   if (memorySearchInput) {
-    memorySearchInput.addEventListener('input', () => {
+    const _debouncedRender = (uiModule.debounce ? uiModule.debounce : (fn => fn))(() => {
+      memoryModule.resetRenderLimit();
       memoryModule.renderMemoryList();
-      memoryModule.updateMemoryCount();
-    });
+    }, 250);
+    memorySearchInput.addEventListener('input', _debouncedRender);
   }
   
   const newMemoryInput = el('new-memory-input');

@@ -14,7 +14,20 @@ let activeCategory = 'all';
 let sortOrder = 'newest';
 let selectMode = false;
 let selectedIds = new Set();
+let _renderLimit = 100;
+const _RENDER_BATCH = 100;
+let _renderedFiltered = [];
+let _sentinelObserver = null;
+let _scrollLoadingMore = false;
 
+// Single delegated outside-click handler — replaces the per-item document
+// listener that leaked ~N listeners every render. One listener total.
+if (!window._memDropdownCloseWired) {
+  window._memDropdownCloseWired = true;
+  document.addEventListener('click', () => {
+    document.querySelectorAll('.memory-item-dropdown').forEach(d => d.remove());
+  });
+}
 
 const MEMORY_CATEGORIES = ['fact', 'identity', 'preference', 'contact', 'project', 'goal', 'task'];
 
@@ -675,6 +688,9 @@ function getFilteredMemories() {
 // ---- Render ----
 
 export function renderMemoryList() {
+  if (!_scrollLoadingMore) _renderLimit = 100;
+  _scrollLoadingMore = false;
+
   const memoryList = document.getElementById('memory-list');
   if (!memoryList) {
     console.error('Memory list element not found');
@@ -682,7 +698,9 @@ export function renderMemoryList() {
   }
 
   const filtered = getFilteredMemories();
+  _renderedFiltered = filtered;
   memoryList.innerHTML = '';
+  if (_sentinelObserver) { _sentinelObserver.disconnect(); _sentinelObserver = null; }
 
   if (filtered.length === 0) {
     const selectBtn = document.getElementById('memory-select-btn');
@@ -704,13 +722,15 @@ export function renderMemoryList() {
         document.querySelector('.memory-tab[data-memory-tab="add"]')?.click();
       });
     }
+    updateMemoryCount(filtered.length, memories.length);
     return;
   }
 
   const selectBtn = document.getElementById('memory-select-btn');
   if (selectBtn) selectBtn.disabled = false;
 
-  filtered.forEach(memory => {
+  const visibleSlice = filtered.slice(0, _renderLimit);
+  visibleSlice.forEach(memory => {
     const item = document.createElement('div');
     item.className = 'memory-item';
     item.dataset.memoryId = String(memory.id);
@@ -952,13 +972,31 @@ export function renderMemoryList() {
         item.addEventListener('pointercancel', _lpCancel);
       }
 
-      // Close dropdown on outside click
-      document.addEventListener('click', () => { if (dropdown.parentNode) dropdown.remove(); }, { once: false });
     }
 
     memoryList.appendChild(item);
   });
 
+  // Load-more sentinel — shows when there are more items than currently rendered
+  if (filtered.length > _renderLimit) {
+    const sentinel = document.createElement('div');
+    sentinel.className = 'memory-load-more-sentinel';
+    sentinel.style.cssText = 'padding:14px;text-align:center;opacity:0.6;font-size:12px;';
+    sentinel.textContent = `Showing ${_renderLimit} of ${filtered.length} — scroll for more`;
+    memoryList.appendChild(sentinel);
+    _sentinelObserver = new IntersectionObserver((entries) => {
+      if (entries.some(e => e.isIntersecting)) {
+        _sentinelObserver.disconnect();
+        _sentinelObserver = null;
+        _scrollLoadingMore = true;
+        _renderLimit += _RENDER_BATCH;
+        renderMemoryList();
+      }
+    }, { root: memoryList.parentElement, rootMargin: '200px' });
+    _sentinelObserver.observe(sentinel);
+  }
+
+  updateMemoryCount(filtered.length, memories.length);
 }
 
 // ---- Inline edit with category picker ----
@@ -1054,27 +1092,17 @@ async function saveInlineEdit(id, newText, newCategory) {
   }
 }
 
-export function updateMemoryCount() {
+export function updateMemoryCount(visibleCount, totalCount) {
   const h2Count = document.getElementById('memory-count-h2');
   const tabCount = document.getElementById('memory-count'); // optional (may be absent)
   if (!h2Count && !tabCount) return;
 
-  const searchInput = document.getElementById('memory-search');
-  const searchTerm = searchInput ? searchInput.value.toLowerCase().trim() : '';
-
-  let visible = memories;
-  const scopeTotal = visible.length;
-  if (searchTerm) {
-    visible = visible.filter(m => m.text && m.text.toLowerCase().includes(searchTerm));
-  }
-  if (activeCategory !== 'all') {
-    visible = visible.filter(m => (m.category || 'fact') === activeCategory);
-  }
-
-  const num = visible.length === scopeTotal ? `${scopeTotal}` : `${visible.length}/${scopeTotal}`;
+  const scopeTotal = totalCount ?? memories.length;
+  const visible = visibleCount ?? scopeTotal;
+  const num = visible === scopeTotal ? `${scopeTotal}` : `${visible}/${scopeTotal}`;
   // Header (next to the "Memories" title) reads "N memories", like the
   // Documents header. The bare number still feeds any tab badge if present.
-  if (h2Count) h2Count.textContent = `${num} ${scopeTotal === 1 && visible.length === scopeTotal ? 'memory' : 'memories'}`;
+  if (h2Count) h2Count.textContent = `${num} ${scopeTotal === 1 && visible === scopeTotal ? 'memory' : 'memories'}`;
   if (tabCount) tabCount.textContent = num;
 }
 
@@ -1510,6 +1538,8 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
+export function resetRenderLimit() { _renderLimit = 100; }
+
 const memoryModule = {
   loadMemories,
   renderMemoryList,
@@ -1521,7 +1551,8 @@ const memoryModule = {
   buildCategoryChips,
   tidyMemories,
   importMemories,
-  exportMemories
+  exportMemories,
+  resetRenderLimit
 };
 
 export default memoryModule;
