@@ -848,7 +848,7 @@ Copy this section into each phase's PR description.
   - [x] Verify: kill uvicorn manually → app process exits within 30s
   - [x] Verify: closing browser window does NOT kill server (intentional)
 
-- [ ] **5.4 (Optional) Menu bar app with rumps**
+- [x] **5.4 (Optional) Menu bar app with rumps**
   - [x] Install rumps: `pip install rumps` (or add to requirements.txt)
   - [x] Create `menu_bar_app.py` with "Open Odysseus", "Shut Down", "Quit"
   - [x] Update `build-macos-app.sh` to launch menu bar app alongside uvicorn
@@ -1054,29 +1054,29 @@ The codebase already has the correct pattern — `_warmup_tool_index()`, `_warmu
 
 ### Phase 6 Tracking Checklist
 
-- [ ] **6.1 Cache-control on `/static/dist/`**
-  - [ ] Update `_RevalidatingStatic.get_response` in `app.py`
+- [x] **6.1 Cache-control on `/static/dist/`**
+  - [x] Update `_RevalidatingStatic.get_response` in `app.py`
   - [ ] Verify `curl -I` shows immutable on dist, no-cache on source
   - [ ] Verify DevTools shows disk cache on repeat load
 
-- [ ] **6.2 Service worker precache refresh**
-  - [ ] Regenerate `PRECACHE` array in `sw.js` for dist entry bundles
-  - [ ] Bump `CACHE_NAME` to `odysseus-v328`
+- [x] **6.2 Service worker precache refresh**
+  - [x] Regenerate `PRECACHE` array in `sw.js` for dist entry bundles
+  - [x] Bump `CACHE_NAME` to `odysseus-v328`
   - [ ] Verify Cache Storage contents post-install
   - [ ] Verify offline reload works
 
-- [ ] **6.3 Vendor KaTeX + Mermaid**
-  - [ ] Download `katex.min.{js,css}`, `mermaid.min.js` to `static/lib/`
-  - [ ] Update `index.html` `<link>`/`<script>` to local paths
-  - [ ] Tighten CSP to drop `cdn.jsdelivr.net`
+- [x] **6.3 Vendor KaTeX + Mermaid**
+  - [x] Download `katex.min.{js,css}`, `mermaid.min.js` to `static/lib/`
+  - [x] Update `index.html` `<link>`/`<script>` to local paths
+  - [x] Tighten CSP to drop `cdn.jsdelivr.net` from style-src and font-src
   - [ ] (Stretch) Lazy-load on first math/mermaid block
   - [ ] Verify offline math + diagram rendering
 
-- [ ] **6.4 Background warmup for YouTube/RAG/managers**
-  - [ ] Add `ensure_*()` lazy accessors
-  - [ ] Move init into `_warmup_services()` background task
-  - [ ] Update consumers of the module-level globals
-  - [ ] Verify `import app` time drops
+- [x] **6.4 Background warmup for YouTube/RAG/managers**
+  - [x] Move YouTube init off import path into `_warmup_youtube` task
+  - [x] Move RAG/ChromaDB connect into `_warmup_rag` task with late-bind
+  - [x] Update consumers (personal_docs_manager + ai_interaction rag_manager)
+  - [ ] Verify `import app` time drops (target ~1.5s from 2.6s)
   - [ ] Verify first-use of each service still works
 
 ### Phase 6 Metrics Targets
