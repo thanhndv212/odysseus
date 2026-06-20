@@ -518,6 +518,11 @@ body.bg-pattern-sparkles {
       background: color-mix(in srgb, var(--fg) 8%, transparent);
     }
 
+    .shutdown-btn:hover {
+      color: #e55;
+      background: color-mix(in srgb, #e55 12%, transparent);
+    }
+
 
     .sidebar.hidden .sidebar-user-bar {
       display: none;
