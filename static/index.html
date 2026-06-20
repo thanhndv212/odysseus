@@ -2426,6 +2426,16 @@
             </div>
             <div id="adm-wipeMsg" style="margin-top:8px;"></div>
           </div>
+
+          <!-- ═══ SHUTDOWN ═══ -->
+          <div class="admin-card admin-danger-card">
+            <h2 style="color:#e55;">Shutdown</h2>
+            <div class="admin-toggle-sub" style="margin-bottom:8px">Stop the Odysseus server. Reopen Odysseus.app to restart.</div>
+            <button class="admin-btn-delete" id="odysseus-shutdown-btn" style="display:inline-flex;align-items:center;gap:5px;white-space:nowrap;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+              Shut Down Odysseus
+            </button>
+          </div>
         </div>
 
       </div>
@@ -2449,5 +2459,31 @@
 <script type="module" src="/static/dist/app.js"></script>
 <script src="/static/js/cookbookSchedule.js"></script>
 <script nonce="{{CSP_NONCE}}">if('serviceWorker' in navigator){navigator.serviceWorker.register('/static/sw.js').catch(()=>{});}</script>
+<script nonce="{{CSP_NONCE}}">
+(function(){
+  var btn = document.getElementById('odysseus-shutdown-btn');
+  if (!btn) return;
+
+  btn.addEventListener('click', async function() {
+    var confirmed = confirm(
+      'Shut down Odysseus?\n\n' +
+      'The server will stop and this window will close.\n' +
+      'To restart, open Odysseus.app again.'
+    );
+    if (!confirmed) return;
+
+    btn.textContent = 'Shutting down\u2026';
+    btn.disabled = true;
+
+    try {
+      await fetch('/api/shutdown', { method: 'POST' });
+    } catch (e) {
+      // Expected — server dies during response
+    }
+
+    setTimeout(function() { window.close(); }, 1000);
+  });
+})();
+</script>
 </body>
 </html>

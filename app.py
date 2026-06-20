@@ -803,6 +803,10 @@ app.include_router(setup_contacts_routes())
 from companion import setup_companion_routes
 app.include_router(setup_companion_routes())
 
+# Shutdown endpoint — allows frontend to stop server gracefully
+from routes.shutdown_routes import setup_shutdown_routes
+app.include_router(setup_shutdown_routes())
+
 # ========= ROUTES (kept in app.py) =========
 
 def _serve_html_with_nonce(request: Request, file_path: str) -> HTMLResponse:

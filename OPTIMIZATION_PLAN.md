@@ -755,60 +755,60 @@ Copy this section into each phase's PR description.
 
 ### Phase 1: Quick Wins
 
-- [ ] **1.1 CSS minification**
-  - [ ] Install cssnano: `npm install -D cssnano postcss`
-  - [ ] Generate: `npx cssnano static/style.css > static/style.min.css`
-  - [ ] Update `<link>` in `index.html`, `login.html`, `backgrounds.html`
-  - [ ] Verify: `ls -lh static/style.min.css` — under 400KB
-  - [ ] Verify: visual spot-check 10 pages
-  - [ ] Record: new transfer size
+- [x] **1.1 CSS minification**
+  - [x] Install cssnano: `npm install -D cssnano postcss`
+  - [x] Generate: `npx cssnano static/style.css > static/style.min.css`
+  - [x] Update `<link>` in `index.html`, `login.html`, `backgrounds.html`
+  - [x] Verify: `ls -lh static/style.min.css` — under 400KB
+  - [x] Verify: visual spot-check 10 pages
+  - [x] Record: new transfer size
 
-- [ ] **1.2 Lazy-load highlight.js**
-  - [ ] Remove `<script defer>` from `index.html`
-  - [ ] Add `ensureHljs()` helper to `codeRunner.js`
-  - [ ] Gate all `hljs.` calls behind `await ensureHljs()`
-  - [ ] Verify: code blocks render with syntax highlighting
-  - [ ] Verify: no `hljs is not defined` in console
-  - [ ] Record: highlight.js only loads when code appears
+- [x] **1.2 Lazy-load highlight.js**
+  - [x] Remove `<script defer>` from `index.html`
+  - [x] Add `ensureHljs()` helper to `codeRunner.js`
+  - [x] Gate all `hljs.` calls behind `await ensureHljs()`
+  - [x] Verify: code blocks render with syntax highlighting
+  - [x] Verify: no `hljs is not defined` in console
+  - [x] Record: highlight.js only loads when code appears
 
-- [ ] **1.3 SQLite maintenance**
-  - [ ] Add `PRAGMA optimize` to startup event
-  - [ ] Add `VACUUM` to shutdown event
-  - [ ] Add old-session cleanup (90+ days) to `cleanup_routes.py`
-  - [ ] Verify: `ls -lh data/app.db` before/after shutdown
-  - [ ] Verify: check logs for PRAGMA/VACUUM execution
+- [x] **1.3 SQLite maintenance**
+  - [x] Add `PRAGMA optimize` to startup event
+  - [x] Add `VACUUM` to shutdown event
+  - [x] Add old-session cleanup (90+ days) to `cleanup_routes.py`
+  - [x] Verify: `ls -lh data/app.db` before/after shutdown
+  - [x] Verify: check logs for PRAGMA/VACUUM execution
 
 ### Phase 2: Data Efficiency
 
-- [ ] **2.1 memory.json pagination**
-  - [ ] Add `?limit=` and `?offset=` params to `GET /api/memory`
-  - [ ] Add mtime-based in-memory cache for memory.json loading
-  - [ ] Return `{memory, total, has_more}` response shape
-  - [ ] Update `static/js/memory.js` to paginated fetch
-  - [ ] Add "Load more" or IntersectionObserver infinite scroll
-  - [ ] Move search to server-side with same pagination
-  - [ ] Verify: `/api/memory?limit=50` returns ~10-20KB
-  - [ ] Verify: load more works, search works, count is correct
+- [x] **2.1 memory.json pagination**
+  - [x] Add `?limit=` and `?offset=` params to `GET /api/memory`
+  - [x] Add mtime-based in-memory cache for memory.json loading
+  - [x] Return `{memory, total, has_more}` response shape
+  - [x] Update `static/js/memory.js` to paginated fetch
+  - [x] Add "Load more" or IntersectionObserver infinite scroll
+  - [x] Move search to server-side with same pagination
+  - [x] Verify: `/api/memory?limit=50` returns ~10-20KB
+  - [x] Verify: load more works, search works, count is correct
 
-- [ ] **2.2 Lazy TTS/STT init**
-  - [ ] Replace module-level `tts_service = get_tts_service()` with `ensure_tts()`
-  - [ ] Replace module-level `stt_service = get_stt_service()` with `ensure_stt()`
-  - [ ] Update route handlers to use `ensure_*()` wrappers
-  - [ ] Verify: cold boot time reduced
-  - [ ] Verify: TTS/STT still works from UI
+- [x] **2.2 Lazy TTS/STT init**
+  - [x] Replace module-level `tts_service = get_tts_service()` with `ensure_tts()`
+  - [x] Replace module-level `stt_service = get_stt_service()` with `ensure_stt()`
+  - [x] Update route handlers to use `ensure_*()` wrappers
+  - [x] Verify: cold boot time reduced
+  - [x] Verify: TTS/STT still works from UI
 
 ### Phase 3: Network Efficiency
 
-- [ ] **3.1 JS bundling with esbuild**
-  - [ ] Install esbuild: `npm install -D esbuild`
-  - [ ] Define bundle entry points (core, chat, memory)
-  - [ ] Run esbuild with `--bundle --format=esm --splitting --minify`
-  - [ ] Update `index.html` to load bundles instead of 35 modules
-  - [ ] Fix cache-busting query params (`?v=...`) in imports
-  - [ ] Keep `cookbookSchedule.js` as external (non-module script)
-  - [ ] Verify: page loads with <10 JS requests
-  - [ ] Verify: all features work (chat, memory, settings, export, cookbook)
-  - [ ] Verify: CSP doesn't block any script loads
+- [x] **3.1 JS bundling with esbuild**
+  - [x] Install esbuild: `npm install -D esbuild`
+  - [x] Define bundle entry points (core, chat, memory)
+  - [x] Run esbuild with `--bundle --format=esm --splitting --minify`
+  - [x] Update `index.html` to load bundles instead of 35 modules
+  - [x] Fix cache-busting query params (`?v=...`) in imports
+  - [x] Keep `cookbookSchedule.js` as external (non-module script)
+  - [x] Verify: page loads with <10 JS requests
+  - [x] Verify: all features work (chat, memory, settings, export, cookbook)
+  - [x] Verify: CSP doesn't block any script loads
 
 ### Phase 4: Code Health
 
@@ -824,37 +824,37 @@ Copy this section into each phase's PR description.
 
 ### Phase 5: macOS App Lifecycle
 
-- [ ] **5.1 Add `/api/shutdown` endpoint**
-  - [ ] Create `routes/shutdown_routes.py` with `POST /api/shutdown`
-  - [ ] Require authentication (effective_user or localhost)
-  - [ ] Use `asyncio.create_task` + 0.5s delay → `os.kill(SIGTERM)`
-  - [ ] Register router in `app.py`
-  - [ ] Verify: `curl -X POST http://localhost:7000/api/shutdown` kills server
-  - [ ] Verify: logs show "Shutdown requested" before exit
+- [x] **5.1 Add `/api/shutdown` endpoint**
+  - [x] Create `routes/shutdown_routes.py` with `POST /api/shutdown`
+  - [x] Require authentication (effective_user or localhost)
+  - [x] Use `asyncio.create_task` + 0.5s delay → `os.kill(SIGTERM)`
+  - [x] Register router in `app.py`
+  - [x] Verify: `curl -X POST http://localhost:7000/api/shutdown` kills server
+  - [x] Verify: logs show "Shutdown requested" before exit
 
-- [ ] **5.2 Add frontend shutdown button**
-  - [ ] Add `shutdownServer()` function to `settings.js` or `app.js`
-  - [ ] Add "Shut Down Odysseus" button with confirmation dialog
-  - [ ] After shutdown, call `window.close()` to close browser
-  - [ ] Keep `SHUTDOWN_ON_CLOSE` default OFF (no auto-shutdown)
-  - [ ] Verify: button visible in settings, click → confirm → server stops
+- [x] **5.2 Add frontend shutdown button**
+  - [x] Add `shutdownServer()` function to `settings.js` or `app.js`
+  - [x] Add "Shut Down Odysseus" button with confirmation dialog
+  - [x] After shutdown, call `window.close()` to close browser
+  - [x] Keep `SHUTDOWN_ON_CLOSE` default OFF (no auto-shutdown)
+  - [x] Verify: button visible in settings, click → confirm → server stops
 
-- [ ] **5.3 Enhance bash launcher**
-  - [ ] Add `trap ... EXIT` to ensure server cleanup on any exit path
-  - [ ] Add watchdog: poll health endpoint, exit if server unreachable for 30s
-  - [ ] Log server exit code to `logs/odysseus-app.log`
-  - [ ] Rebuild app: `./build-macos-app.sh`
-  - [ ] Verify: launch app, call `/api/shutdown` → app process exits cleanly
-  - [ ] Verify: kill uvicorn manually → app process exits within 30s
-  - [ ] Verify: closing browser window does NOT kill server (intentional)
+- [x] **5.3 Enhance bash launcher**
+  - [x] Add `trap ... EXIT` to ensure server cleanup on any exit path
+  - [x] Add watchdog: poll health endpoint, exit if server unreachable for 30s
+  - [x] Log server exit code to `logs/odysseus-app.log`
+  - [x] Rebuild app: `./build-macos-app.sh`
+  - [x] Verify: launch app, call `/api/shutdown` → app process exits cleanly
+  - [x] Verify: kill uvicorn manually → app process exits within 30s
+  - [x] Verify: closing browser window does NOT kill server (intentional)
 
 - [ ] **5.4 (Optional) Menu bar app with rumps**
-  - [ ] Install rumps: `pip install rumps` (or add to requirements.txt)
-  - [ ] Create `menu_bar_app.py` with "Open Odysseus", "Shut Down", "Quit"
-  - [ ] Update `build-macos-app.sh` to launch menu bar app alongside uvicorn
-  - [ ] Rebuild and verify: ⛵ icon in menu bar, all menu items work
-  - [ ] Verify: "Shut Down" → server exits, icon disappears
-  - [ ] Verify: "Quit" → force-kills everything
+  - [x] Install rumps: `pip install rumps` (or add to requirements.txt)
+  - [x] Create `menu_bar_app.py` with "Open Odysseus", "Shut Down", "Quit"
+  - [x] Update `build-macos-app.sh` to launch menu bar app alongside uvicorn
+  - [x] Rebuild and verify: ⛵ icon in menu bar, all menu items work
+  - [x] Verify: "Shut Down" → server exits, icon disappears
+  - [x] Verify: "Quit" → force-kills everything
 
 ---
 

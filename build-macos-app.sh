@@ -126,8 +126,34 @@ else
 fi
 SERVER_PID=$!
 
-# Quitting the app stops the server it started.
-trap 'kill $SERVER_PID 2>/dev/null; exit 0' TERM INT
+# Cleanup: ensure server process is killed on any exit path.
+cleanup() {
+    kill $SERVER_PID 2>/dev/null
+    wait $SERVER_PID 2>/dev/null
+    echo "$(date): uvicorn exited with code ${EXIT_CODE:-unknown}" >> "$LOG"
+}
+trap cleanup TERM INT EXIT
+
+# Watchdog: if server becomes unreachable for 30+ seconds (15 failures × 2s
+# interval), assume it crashed and exit so macOS doesn't leave a zombie app.
+(
+    FAILS=0
+    while kill -0 "$SERVER_PID" 2>/dev/null; do
+        if ! /usr/bin/curl -s -o /dev/null --max-time 2 "$URL" 2>/dev/null; then
+            FAILS=$((FAILS + 1))
+            if [ "$FAILS" -ge 15 ]; then
+                echo "$(date): server unreachable for 30s — watchdog exiting" >> "$LOG"
+                kill "$SERVER_PID" 2>/dev/null
+                exit 1
+            fi
+        else
+            FAILS=0
+        fi
+        sleep 2
+    done
+) &
+WATCHDOG_PID=$!
+trap 'kill $WATCHDOG_PID 2>/dev/null; cleanup' TERM INT EXIT
 
 # Wait for readiness (first run downloads an embedding model — allow ~2 min).
 READY=0
@@ -143,7 +169,9 @@ if [ "$READY" = "1" ]; then
 else
   notify "Odysseus is taking a while — open $URL once it finishes starting."
 fi
-wait "$SERVER_PID"
+EXIT_CODE=0
+wait "$SERVER_PID" || EXIT_CODE=$?
+echo "$(date): uvicorn exited with code $EXIT_CODE" >> "$LOG"
 LAUNCHER
 
 sed -e "s|__INSTALL_DIR__|$INSTALL_DIR|g" -e "s|__PORT__|$PORT|g" \
