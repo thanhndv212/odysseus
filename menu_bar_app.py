@@ -62,17 +62,25 @@ class OdysseusMenuBar(rumps.App):
 
         self._shutting_down = False
 
-        # Menu items
+        # Menu items — assign to self.menu to register them with rumps.
+        # In rumps >= 0.4.0, rumps.separator is an object, not callable.
         self.open_item = rumps.MenuItem("Open Odysseus", callback=self._open_browser)
         self.status_item = rumps.MenuItem("Status: Starting…", callback=None)
-        rumps.separator()
         self.shutdown_item = rumps.MenuItem("Shut Down Server", callback=self._shutdown_server)
-        rumps.separator()
-        rumps.MenuItem("Quit", callback=self._quit)
+        self.quit_item = rumps.MenuItem("Quit", callback=self._quit)
+        self.menu = [
+            self.open_item,
+            self.status_item,
+            rumps.separator,
+            self.shutdown_item,
+            rumps.separator,
+            self.quit_item,
+        ]
 
         # Status polling timer — updates the menu title with a ●/○ indicator.
         # Poll every 5 seconds; lightweight (single TCP + HTTP GET).
-        self.timer(rumps.Timer(self._health_check, 5), start=True)
+        self.health_timer = rumps.Timer(self._health_check, 5)
+        self.health_timer.start()
 
     # ── Callbacks ──────────────────────────────────────────────────────
 
