@@ -27,6 +27,10 @@ echo "  port:        $PORT"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
+# Copy the menu bar app script (Phase 5.4 — runs alongside uvicorn).
+cp "$REPO_DIR/menu_bar_app.py" "$APP/Contents/MacOS/menu_bar_app.py"
+echo "  menu bar:    ⛵ menu_bar_app.py"
+
 # ── Icon (best effort) — center-crop docs/odysseus.jpg to a square .icns ──
 if [ -f "$REPO_DIR/docs/odysseus.jpg" ] && command -v sips >/dev/null 2>&1; then
   TMPIMG="$(mktemp -d)"
@@ -74,6 +78,7 @@ INSTALL_DIR="__INSTALL_DIR__"
 PORT="__PORT__"
 URL="http://127.0.0.1:${PORT}"
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+export APP_PORT="$PORT"
 
 UVICORN="$INSTALL_DIR/venv/bin/uvicorn"
 LOG="$INSTALL_DIR/logs/odysseus-app.log"
@@ -126,8 +131,22 @@ else
 fi
 SERVER_PID=$!
 
-# Cleanup: ensure server process is killed on any exit path.
+# ── Menu bar app (Phase 5.4) ──
+# Runs alongside uvicorn providing a ⛵ icon with Open/Shut Down/Quit.
+# Uses the same venv Python. Exits when rumps.quit_application() is called.
+MENU_BAR="$INSTALL_DIR/venv/bin/python $INSTALL_DIR/menu_bar_app.py"
+if [ -x "$INSTALL_DIR/venv/bin/python" ] && "$INSTALL_DIR/venv/bin/python" -c "import rumps" 2>/dev/null; then
+  "$INSTALL_DIR/venv/bin/python" "$INSTALL_DIR/menu_bar_app.py" >>"$LOG" 2>&1 &
+  BAR_PID=$!
+  echo "Menu bar app started (PID $BAR_PID)"
+else
+  BAR_PID=""
+  echo "Menu bar app skipped (rumps not installed)"
+fi
+
+# Cleanup: ensure server + menu bar processes are killed on any exit path.
 cleanup() {
+    [ -n "$BAR_PID" ] && kill $BAR_PID 2>/dev/null
     kill $SERVER_PID 2>/dev/null
     wait $SERVER_PID 2>/dev/null
     echo "$(date): uvicorn exited with code ${EXIT_CODE:-unknown}" >> "$LOG"

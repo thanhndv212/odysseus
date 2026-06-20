@@ -43,6 +43,10 @@ qrcode[pil]
 croniter
 pytest
 pytest-asyncio
+# macOS menu bar app (Phase 5.4 — build-macos-app.sh launches it alongside uvicorn).
+# rumps wraps NSStatusBar via pyobjc — pure Python, no Xcode/Swift needed.
+# Only used when running as Odysseus.app; silently unused on headless/server.
+rumps
 # starlette.testclient prefers httpx2 since Starlette 1.2.0 and warns on every
 # TestClient import when only classic httpx is present. Runtime code keeps
 # using `httpx` above; this is test-client only.
