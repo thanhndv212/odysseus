@@ -7,60 +7,28 @@
 //   - Other static assets (images/fonts/libs): cache-first with bg refresh.
 //   - API / non-GET: never cached.
 // Bump CACHE_NAME whenever the precache list or SW logic changes.
-const CACHE_NAME = 'odysseus-v327';
+//
+// Phase 6.2 (2026-06-20): precache list regenerated for the Phase 3 esbuild
+// output. We precache only the app shell + entry bundle (/static/dist/app.js)
+// and let the runtime cache-first handler below pick up the hash-named
+// chunk-*.js files on first navigation. This decouples the SW from esbuild's
+// per-build content hashes: a rebuild that re-hashes chunks still works
+// without touching this file.
+const CACHE_NAME = 'odysseus-v328';
 
 // Core shell precached on install so repeat opens are instant without any
-// network wait. Keep this list in sync with the <script type="module"> tags
-// and <link rel="stylesheet"> in index.html.
+// network wait. Keep this list in sync with the <script>/<link> tags in
+// index.html. Entry bundles only — chunk-* files are caught by the runtime
+// handler. Vendored libs (KaTeX, Mermaid, highlight) are listed explicitly
+// because they're loaded outside the module graph.
 const PRECACHE = [
   '/',
-  '/static/style.css',
-  '/static/app.js',
-  '/static/js/storage.js',
-  '/static/js/ui.js',
-  '/static/js/markdown.js',
-  '/static/js/dragSort.js',
-  '/static/js/sessions.js',
-  '/static/js/memory.js',
-  '/static/js/skills.js',
-  '/static/js/tourHints.js',
-  '/static/js/fileHandler.js',
-  '/static/js/voiceRecorder.js',
-  '/static/js/models.js',
-  '/static/js/rag.js',
-  '/static/js/presets.js',
-  '/static/js/search.js',
-  '/static/js/spinner.js',
-  '/static/js/tts-ai.js',
-  '/static/js/document.js',
-  '/static/js/gallery.js',
-  '/static/js/chatRenderer.js',
-  '/static/js/codeRunner.js',
-  '/static/js/chatStream.js',
-  '/static/js/chat.js',
-  '/static/js/cookbook.js',
-  '/static/js/search-chat.js',
-  '/static/js/compare/index.js',
-  '/static/js/theme.js',
-  '/static/js/censor.js',
-  '/static/js/settings.js',
-  '/static/js/admin.js',
-  '/static/js/init.js',
-  '/static/js/slashCommands.js',
-  '/static/js/emailInbox.js',
-  '/static/js/emailLibrary/utils.js',
-  '/static/js/emailLibrary/signatureFold.js',
-  '/static/js/emailLibrary/state.js',
-  '/static/js/notes.js',
-  '/static/js/tasks.js',
-  '/static/js/calendar.js',
-  '/static/js/calendar/utils.js',
-  '/static/js/calendar/reminders.js',
-  '/static/js/group.js',
-  '/static/js/keyboard-shortcuts.js',
-  '/static/js/sidebar-layout.js',
-  '/static/js/section-management.js',
+  '/static/style.min.css',
+  '/static/dist/app.js',
   '/static/lib/highlight.min.js',
+  '/static/lib/katex.min.js',
+  '/static/lib/katex.min.css',
+  '/static/lib/mermaid.min.js',
 ];
 
 self.addEventListener('install', (e) => {

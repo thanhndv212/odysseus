@@ -6,7 +6,10 @@ from typing import Dict, Any
 
 from fastapi import APIRouter, HTTPException, Form, Request
 
-from services.youtube.youtube_handler import extract_youtube_id, extract_transcript_async
+# NOTE: services.youtube.youtube_handler is imported lazily inside the
+# /api/test/youtube handler below. Importing it at module load pulls in
+# google-api-python-client (~500ms) on every cold boot, and YouTube is only
+# exercised by that one diagnostic endpoint. (Phase 6.4)
 from core.constants import DEFAULT_HOST, DATA_DIR
 from core.middleware import require_admin
 
@@ -74,6 +77,12 @@ def setup_diagnostics_routes(
     async def test_youtube(request: Request, url: str) -> Dict[str, Any]:
         require_admin(request)
         try:
+            # Lazy import — keeps google-api-python-client (~500ms) off the
+            # cold-boot import path. See module-header note (Phase 6.4).
+            from services.youtube.youtube_handler import (
+                extract_youtube_id,
+                extract_transcript_async,
+            )
             video_id = extract_youtube_id(url)
             if not video_id:
                 return {"error": "Invalid YouTube URL"}

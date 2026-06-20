@@ -413,17 +413,30 @@ os.makedirs(STATIC_DIR, exist_ok=True)
 
 
 class _RevalidatingStatic(StaticFiles):
-    """Serve static assets normally, but force the browser to REVALIDATE
-    source files (.js/.css/.html) on every load instead of serving a stale
-    copy from disk cache. The app ships raw ES modules with no build step or
-    versioned URLs, so browsers were caching modules across deploys — a code
-    change wouldn't appear without a manual hard-refresh. `no-cache` keeps the
-    cached bytes but requires a conditional request; unchanged files still
-    return a cheap 304 (ETag/Last-Modified are preserved)."""
+    """Serve static assets with a cache policy that matches how each file is
+    versioned:
+
+    - ``/static/dist/`` (Phase 3 esbuild output): files have content-hashed
+      names (``chunk-4TRHFITE.js``), so a given name's bytes never change —
+      emit ``immutable`` and cache hard. This avoids ~40 conditional
+      revalidation round-trips per page load, which is the whole point of
+      bundling.
+    - Everything else under ``/static/`` (raw ``.js``/``.css``/``.html``
+      source, un-versioned): force REVALIDATE on every load. The app ships
+      raw ES modules with no build step, so browsers were caching modules
+      across edits — a code change wouldn't appear without a manual
+      hard-refresh. ``no-cache`` keeps the cached bytes but requires a
+      conditional request; unchanged files still return a cheap 304
+      (ETag/Last-Modified are preserved)."""
 
     async def get_response(self, path, scope):
         resp = await super().get_response(path, scope)
-        if path.endswith((".js", ".css", ".html")):
+        # StaticFiles strips the mount prefix, so `path` arrives relative to
+        # the static dir (e.g. "dist/app.js", "style.min.css"). Handle both.
+        normalized = path.lstrip("/")
+        if normalized.startswith("dist/"):
+            resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        elif path.endswith((".js", ".css", ".html")):
             resp.headers["Cache-Control"] = "no-cache"
         return resp
 
@@ -474,8 +487,12 @@ async def serve_generated_image(filename: str, request: Request):
     )
 
 # ========= YOUTUBE INIT =========
-from services.youtube import init_youtube
-init_youtube()
+# Deferred to background warmup (Phase 6.4). The `services.youtube` import alone
+# pulls in google-api-python-client + google-auth (~687ms on a cold interpreter),
+# and YouTube is only needed for a single feature. Importing + initializing it
+# at module load was blocking server readiness; both now run in `_warmup_youtube`
+# after the server is accepting traffic. See `_startup_event`.
+_youtube_initialized = False
 
 # ========= RAG (vector document RAG) =========
 # VectorRAG (ChromaDB-backed personal-document semantic search). Initialized
@@ -487,16 +504,17 @@ init_youtube()
 # 2.12 were mutually incompatible at the time. With the current pins
 # (chromadb 1.5.x + pydantic 2.13.x) the init works and Personal Docs
 # (POST /api/personal/add_directory etc.) is functional again.
-from src.rag_singleton import get_rag_manager
-rag_manager = get_rag_manager()
-rag_available = rag_manager is not None
-if rag_available:
-    logger.info("Vector document RAG initialized")
-else:
-    logger.info(
-        "Vector document RAG not available at startup "
-        "(ChromaDB may not be reachable yet — routes will retry lazily)"
-    )
+#
+# Phase 6.4: the synchronous ~1s ChromaDB connect was moved off the import
+# path. `initialize_managers` runs with rag_manager=None so routers can wire up
+# immediately; `_warmup_rag` (in _startup_event) connects ChromaDB in the
+# background and late-binds the manager into personal_docs_manager. Routes that
+# touch RAG already tolerate None (the "ChromaDB not reachable" contract), so
+# a request that lands before warmup completes behaves exactly like a cold
+# ChromaDB — degraded, not broken.
+from src.rag_singleton import get_rag_manager  # import only; do NOT call yet
+rag_manager = None
+rag_available = False
 
 # ========= IMPORT CONFIG =========
 from src.config import config
@@ -1044,6 +1062,53 @@ async def _startup_event():
                 await asyncio.sleep(300)  # Back off on error
 
     _startup_tasks.append(asyncio.create_task(_keepalive_loop()))
+
+    # Phase 6.4: warm up YouTube off the request path. The `services.youtube`
+    # import alone is ~687ms (google-api-python-client + google-auth); deferring
+    # both import and init here shaves that off cold boot. YouTube features
+    # simply aren't available until this completes (a few hundred ms after the
+    # server starts accepting traffic).
+    async def _warmup_youtube():
+        global _youtube_initialized
+        try:
+            from services.youtube import init_youtube
+            await asyncio.to_thread(init_youtube)
+            _youtube_initialized = True
+            logger.info("[startup] YouTube initialized (background)")
+        except Exception as e:
+            logger.warning(f"YouTube warmup failed (non-critical): {type(e).__name__}: {e}")
+
+    _startup_tasks.append(asyncio.create_task(_warmup_youtube()))
+
+    # Phase 6.4: connect ChromaDB off the import path (~1s). Late-bind the
+    # manager into personal_docs_manager so RAG-backed personal-doc search
+    # comes online a moment after boot instead of blocking server readiness.
+    # Consumers already tolerate rag_manager is None (clean 503 / degraded).
+    async def _warmup_rag():
+        global rag_manager, rag_available
+        try:
+            mgr = await asyncio.to_thread(get_rag_manager)
+            if mgr is None:
+                logger.info(
+                    "Vector document RAG not available "
+                    "(ChromaDB unreachable — routes will retry lazily)"
+                )
+                return
+            rag_manager = mgr
+            rag_available = True
+            # Late-bind into the already-constructed personal_docs_manager.
+            # Safe: PersonalDocsManager stores rag_manager as an attribute and
+            # only reads it inside search/index methods (never at __init__).
+            personal_docs_mgr.rag_manager = mgr
+            # ai_interaction stores its own rag_manager global (set_rag_manager
+            # at import time received None). Re-propagate the now-warmed manager.
+            from src.ai_interaction import set_rag_manager as _set_ai_rag
+            _set_ai_rag(mgr, personal_docs_mgr)
+            logger.info("Vector document RAG initialized (background)")
+        except Exception as e:
+            logger.warning(f"RAG warmup failed (non-critical): {type(e).__name__}: {e}")
+
+    _startup_tasks.append(asyncio.create_task(_warmup_rag()))
 
     async def _ensure_default_tasks():
         # Create/reconcile default automation tasks + personal assistant for every user.

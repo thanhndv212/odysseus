@@ -928,3 +928,163 @@ This document is a living plan. After each phase:
 4. **Document** — add notes on what worked, what didn't, surprises
 
 If a phase shows less benefit than expected, **question whether subsequent phases are worth it.** The effort estimates are ranges — stop early if diminishing returns kick in.
+
+---
+
+## Phase 6: Post-Bundling Cleanup & Hardening (~2 hours)
+
+> **Created:** 2026-06-20
+> **Status:** In progress
+> **Context:** Phase 3 (esbuild bundling) shipped immutable hash-named bundles in `/static/dist/`, but several follow-on tasks were missed. This phase closes those gaps and removes a few remaining inefficiencies surfaced by reviewing the *current* state after Phases 1–5.
+
+### Summary
+
+Phase 3 changed *which* JS the browser loads (`/static/js/*.js` → `/static/dist/chunk-*.js`) but left three consumers of that decision unchanged: the static-file cache policy, the service worker precache list, and the CSP/CDN assumptions. The result is that the bundling work is partially defeated — bundles are re-validated on every load, the PWA precaches files that no longer exist, and two libraries are still pulled from an external CDN despite the project's local-first stance.
+
+| # | What | Impact | Effort | Type |
+|---|------|--------|--------|------|
+| 6.1 | Cache-control: immutable on `/static/dist/` | ~40 revalidation round-trips/page eliminated | 10 min | Bug (Phase 3 regression) |
+| 6.2 | Regenerate service worker precache list | PWA repeat-open caching works again | 15 min | Bug (Phase 3 regression) |
+| 6.3 | Vendor KaTeX + Mermaid locally | Offline support, drop external CSP dependency | 20 min | Alignment w/ local-first stance |
+| 6.4 | Defer YouTube / RAG / managers init to background warmup | ~1s off cold boot (`import app`) | 30 min | Perf (consistent w/ existing warmup pattern) |
+
+**Expected:** cold boot 2.6s → ~1.5s, page-load round-trips ~40 → ~5, PWA repeat-open instant, no external runtime CDN dependency.
+
+---
+
+### 6.1 Cache-control: immutable on `/static/dist/`
+
+**Problem.** `app.py:_RevalidatingStatic.get_response` (lines 424–428) forces `Cache-Control: no-cache` on every `.js/.css/.html`. That policy is correct for the *editable* source files in `/static/js/` and `/static/style.css` (they ship raw, un-versioned) — but Phase 3 introduced `/static/dist/` bundles with **content-hashed filenames** (`chunk-4TRHFITE.js`, `app.js` rebuilt per build). A hashed name is its own version: when the content changes the name changes, so the bytes behind any given name are immutable. `no-cache` on them forces a conditional request (ETag round-trip) per file per page load — ~40 unnecessary round-trips, exactly the waterfall Phase 3 was meant to kill.
+
+**Fix.** In `app.py`, keep `no-cache` for source files but emit `public, max-age=31536000, immutable` for anything under `/static/dist/`.
+
+```python
+async def get_response(self, path, scope):
+    resp = await super().get_response(path, scope)
+    if path.startswith("/dist/") or path.startswith("dist/"):
+        # Phase 3 esbuild output: hash-named, immutable. Cache hard.
+        resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    elif path.endswith((".js", ".css", ".html")):
+        # Raw, un-versioned source — revalidate to pick up edits.
+        resp.headers["Cache-Control"] = "no-cache"
+    return resp
+```
+
+**Risk.** A stale bundle could be served if a hash collision occurred across builds — esbuild's default content hash makes this astronomically unlikely. If a bundle ever does need to be invalidated manually, bumping `CACHE_NAME` in `sw.js` (6.2) flushes all SW-cached copies.
+
+**Verification.**
+- `curl -I http://localhost:7000/static/dist/app.js` → `cache-control: public, max-age=31536000, immutable`
+- `curl -I http://localhost:7000/static/style.min.css` → `cache-control: no-cache` (unchanged)
+- DevTools Network → second page load shows `(disk cache)` for dist bundles, no 304s.
+
+**Files:** `app.py` (lines ~424–428).
+
+---
+
+### 6.2 Regenerate service worker precache list
+
+**Problem.** `static/sw.js` precaches the **pre-bundle** paths (`/static/js/storage.js`, `/static/js/ui.js`, …, `/static/app.js`) — see lines 18–50. After Phase 3, `index.html:2462` loads `/static/dist/app.js` and the module graph pulls `/static/dist/chunk-*.js`. `sw.js` contains **zero** `dist/` references. Net effect: the SW precaches ~35 files that are never requested and misses every file that is — so "instant repeat open from cache" (the PWA's main benefit) silently broke when Phase 3 landed.
+
+**Fix.** Regenerate the `PRECACHE` array from the assets the app actually loads: `/`, the CSS link(s), `/static/dist/app.js`, and every `/static/dist/chunk-*.js` referenced by the module graph. Bump `CACHE_NAME` (`odysseus-v327` → `odysseus-v328`) so existing clients drop the stale precache on next load.
+
+**Note on chunk list stability.** esbuild emits deterministic hash names for a given source tree, so the chunk list is stable across builds *with identical input*. To stay robust against future rebuilds that re-hash, list the entry bundles (`/static/dist/app.js` + the lazy entry points like `memory-*.js`, `document-*.js`) in `PRECACHE`, and rely on the SW's existing runtime cache (cache-first for same-origin static) to pick up the `chunk-*` files on first navigation. This precaches the shell without coupling to esbuild's hash naming.
+
+**Risk.** Low — the SW already has a runtime fallback for assets not in the precache list. Worst case is a slightly warmer first repeat-open; correctness is unaffected.
+
+**Verification.**
+- DevTools → Application → Service Workers → `odysseus-v328` active, old version gone.
+- DevTools → Application → Cache Storage → `odysseus-v328` contains `/static/dist/app.js` (not the old `/static/js/*`).
+- Open app, close tab, disconnect network, reopen → app loads from cache.
+
+**Files:** `static/sw.js`.
+
+---
+
+### 6.3 Vendor KaTeX + Mermaid locally
+
+**Problem.** `index.html:202–204` loads KaTeX (JS + CSS) and Mermaid eagerly from `cdn.jsdelivr.net`. This contradicts the project's explicit local-first stance — see "Decisions & Arguments → What we deliberately did NOT include": *"CDN for static assets: Single-user local app — CDN adds latency, external dependency, and CSP complexity. No benefit."* Every other heavy lib (xlsx, docx, mammoth, html2pdf, qrcode, highlight) is already vendored in `static/lib/`.
+
+Consequences: math/diagrams break when offline (Tailscale, airplane, CDN outage); the CSP must permanently allow `https://cdn.jsdelivr.net`; cold load waits on an external TLS handshake.
+
+**Fix.**
+1. Download the three assets to `static/lib/`:
+   - `katex@0.16.22/dist/katex.min.js`
+   - `katex@0.16.22/dist/katex.min.css`
+   - `mermaid@11/dist/mermaid.min.js`
+2. Update `index.html` `<link>`/`<script>` to point at `/static/lib/...`.
+3. Tighten the CSP `script-src`/`style-src` to drop `cdn.jsdelivr.net` (verify nothing else uses it first).
+4. (Optional, stretch) make them lazy-load on first math/mermaid block, matching the existing `ensureHljs()` pattern from Phase 1.2 — both libs are only needed on chat turns that render math or diagrams.
+
+**Risk.** Vendored copies go stale vs. upstream. Acceptable: this is a single-user local app, and the same staleness already applies to xlsx/docx/mammoth. Add a comment with the version pin (`@0.16.22`, `@11`) next to each vendored file so future updates are trivial.
+
+**Verification.**
+- Disconnect network, reload, send a message with `$E=mc^2$` → renders with KaTeX.
+- Send a message with a ```` ```mermaid ```` block → renders.
+- DevTools Network → zero requests to `cdn.jsdelivr.net`.
+
+**Files:** `static/index.html` (lines 202–204), new `static/lib/katex.min.{js,css}`, `static/lib/mermaid.min.js`, CSP config (verify location).
+
+---
+
+### 6.4 Defer YouTube / RAG / managers init to background warmup
+
+**Problem.** `time python -c "import app"` = **2.6s**, and the server can't accept requests until import finishes. Several heavy initializations run synchronously at module import time:
+
+- `app.py:477–478` — `init_youtube()` at import.
+- `app.py:491` — `rag_manager = get_rag_manager()` (ChromaDB connect) at import.
+- `app.py:507` — `components = initialize_managers(BASE_DIR, rag_manager)` at import.
+
+The codebase already has the correct pattern — `_warmup_tool_index()`, `_warmup_endpoints()`, `_keepalive_loop()`, `_null_owner_sweep_loop()` are all scheduled as background `asyncio.create_task`s in `_startup_event` (lines 1011–1180). YouTube/RAG/managers should follow the same shape: let the server bind and accept requests immediately, then warm up the heavyweight services in the background. Routes that touch them already handle `None` / not-ready gracefully (the Phase 2.2 lazy-init pattern proved this for TTS/STT).
+
+**Fix.**
+- Wrap `init_youtube()`, `get_rag_manager()`, and the dependent parts of `initialize_managers()` in lazy accessors (`ensure_youtube()`, `ensure_rag()`) returning `None` until warmed.
+- Move the actual initialization into a new `_startup_tasks.append(asyncio.create_task(_warmup_services()))` in `_startup_event`.
+- Update consumers to call the accessors instead of the module-level globals.
+
+**Risk.** First request to a not-yet-warmed service sees `None` — but those routes already return clean 503/empty responses for `rag_manager is None` (the existing `get_rag_manager()` "returns None if ChromaDB isn't reachable" contract, per the RAG comment at `app.py:481–484`). Net effect is a perceived win: server is up ~1s sooner; cold first-RAG-request cost moves from boot to first use.
+
+**Verification.**
+- `time python -c "import app"` → target ~1.5s (down from 2.6s).
+- Server accepts `/api/health` within ~1s of process start.
+- First chat using RAG still works (may take ~1s longer on the *first* call only).
+
+**Files:** `app.py` (lines 477–507, 931–1180), plus consumers of `rag_manager` / youtube / `components` globals.
+
+---
+
+### Phase 6 Tracking Checklist
+
+- [ ] **6.1 Cache-control on `/static/dist/`**
+  - [ ] Update `_RevalidatingStatic.get_response` in `app.py`
+  - [ ] Verify `curl -I` shows immutable on dist, no-cache on source
+  - [ ] Verify DevTools shows disk cache on repeat load
+
+- [ ] **6.2 Service worker precache refresh**
+  - [ ] Regenerate `PRECACHE` array in `sw.js` for dist entry bundles
+  - [ ] Bump `CACHE_NAME` to `odysseus-v328`
+  - [ ] Verify Cache Storage contents post-install
+  - [ ] Verify offline reload works
+
+- [ ] **6.3 Vendor KaTeX + Mermaid**
+  - [ ] Download `katex.min.{js,css}`, `mermaid.min.js` to `static/lib/`
+  - [ ] Update `index.html` `<link>`/`<script>` to local paths
+  - [ ] Tighten CSP to drop `cdn.jsdelivr.net`
+  - [ ] (Stretch) Lazy-load on first math/mermaid block
+  - [ ] Verify offline math + diagram rendering
+
+- [ ] **6.4 Background warmup for YouTube/RAG/managers**
+  - [ ] Add `ensure_*()` lazy accessors
+  - [ ] Move init into `_warmup_services()` background task
+  - [ ] Update consumers of the module-level globals
+  - [ ] Verify `import app` time drops
+  - [ ] Verify first-use of each service still works
+
+### Phase 6 Metrics Targets
+
+| Metric | Before Phase 6 | Target | Item |
+|--------|----------------|--------|------|
+| `import app` cold boot | 2.6s | ~1.5s | 6.4 |
+| Page-load dist round-trips (repeat) | ~40 (304s) | ~0 (disk cache) | 6.1 |
+| PWA repeat-open from cache | broken | instant | 6.2 |
+| External runtime CDN deps | 2 (KaTeX, Mermaid) | 0 | 6.3 |
+| CSP `cdn.jsdelivr.net` allowance | yes | no | 6.3 |

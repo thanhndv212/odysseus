@@ -114,9 +114,13 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             # don't execute script, the residual risk is visual-only.
             response.headers["Content-Security-Policy"] = (
                 "default-src 'self'; "
+                # NOTE: https://cdn.jsdelivr.net is retained ONLY for Pyodide
+                # (codeRunner.js loads it on-demand for the in-browser Python
+                # runner). KaTeX + Mermaid were vendored locally in Phase 6.3,
+                # so once Pyodide is also vendored this entry can be dropped.
                 f"script-src 'self' 'nonce-{nonce}' https://cdn.jsdelivr.net; "
-                "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
-                "font-src 'self' https://cdn.jsdelivr.net; "
+                "style-src 'self' 'unsafe-inline'; "
+                "font-src 'self'; "
                 "img-src 'self' data: blob:; "
                 "media-src 'self' blob:; "
                 "connect-src 'self'; "
