@@ -44,7 +44,7 @@ def setup_memory_routes(memory_manager: MemoryManager, session_manager: SessionM
     _mem_cache: Dict[str, tuple[float, list]] = {}
 
     def _cached_load(owner: str | None) -> list:
-        mem_file = os.path.join(memory_manager.data_dir, "memory.json")
+        mem_file = memory_manager.memory_file
         mtime = os.path.getmtime(mem_file) if os.path.exists(mem_file) else 0
         cache_key = owner or "__none__"
         entry = _mem_cache.get(cache_key)
