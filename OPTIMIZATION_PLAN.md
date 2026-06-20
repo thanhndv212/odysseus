@@ -812,15 +812,15 @@ Copy this section into each phase's PR description.
 
 ### Phase 4: Code Health
 
-- [ ] **4.1 Split tool_implementations.py**
-  - [ ] Audit import graph: identify leaf modules
-  - [ ] Create `src/tools/` package with `__init__.py`
-  - [ ] Extract tool functions into domain modules
-  - [ ] Re-export from `__init__.py` with dispatch table
-  - [ ] Update all imports in consuming files
-  - [ ] Verify: `py_compile` all modules
-  - [ ] Verify: `pytest tests/ -x -q --tb=short`
-  - [ ] Verify: all tools work in chat
+- [x] **4.1 Split tool_implementations.py**
+  - [x] Audit import graph: identify leaf modules
+  - [x] Create `src/tools/` package with `__init__.py`
+  - [x] Extract tool functions into domain modules
+  - [x] Re-export from `__init__.py` with dispatch table
+  - [x] Update all imports in consuming files
+  - [x] Verify: `py_compile` all modules
+  - [x] Verify: `pytest tests/ -x -q --tb=short`
+  - [x] Verify: all tools work in chat
 
 ### Phase 5: macOS App Lifecycle
 
