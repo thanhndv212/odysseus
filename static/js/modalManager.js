@@ -1416,6 +1416,7 @@ const _AUTO_WIRE = {
   'theme-modal':          { rail: null,             sidebar: 'tool-theme-btn' },
   'settings-modal':       { rail: null,             sidebar: 'tool-settings-btn' },
   'compare-model-overlay':{ rail: 'rail-compare',   sidebar: 'tool-compare-btn' },
+  'terminal-modal':       { rail: 'rail-terminal',  sidebar: 'tool-terminal-btn' },
   'ge-shortcuts-modal':   { rail: null,             sidebar: null },
   // Prompt window opens from the overflow menu (no rail/sidebar button), but
   // wiring it here makes tab-down use the new .minimized-dock-chip instead of
@@ -1473,6 +1474,7 @@ const _SWIPE_DOWN_MINIMIZES = new Set([
   'cookbook-modal',
   'calendar-modal',
   'email-lib-modal',
+  'terminal-modal',
 ]);
 // Same idea but matched by id prefix — so dynamically-created modals
 // (per-email reader tabs) survive swipe-down too.

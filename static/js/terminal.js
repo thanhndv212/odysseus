@@ -48,8 +48,7 @@
                 },
             });
 
-            // Inject minimize button (modalManager handles this)
-            Modals().injectMinimizeButton(modal, MODAL_ID);
+            // Minimize button is auto-injected by modalManager._scanAndWire()
         }
 
         // Show the modal
