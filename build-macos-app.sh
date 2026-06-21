@@ -28,7 +28,9 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 # Copy the menu bar app script (Phase 5.4 — runs alongside uvicorn).
-cp "$REPO_DIR/menu_bar_app.py" "$APP/Contents/MacOS/menu_bar_app.py"
+# Stored in Resources/ (not MacOS/) to avoid macOS Launch Services confusion
+# with .py files in the executable directory.
+cp "$REPO_DIR/menu_bar_app.py" "$APP/Contents/Resources/menu_bar_app.py"
 echo "  menu bar:    ⛵ menu_bar_app.py"
 
 # ── Icon (best effort) — center-crop docs/odysseus.jpg to a square .icns ──
@@ -57,9 +59,9 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <dict>
     <key>CFBundleName</key>            <string>$APP_NAME</string>
     <key>CFBundleDisplayName</key>     <string>$APP_NAME</string>
-    <key>CFBundleIdentifier</key>      <string>com.odysseus.launcher</string>
-    <key>CFBundleVersion</key>         <string>1.0</string>
-    <key>CFBundleShortVersionString</key><string>1.0</string>
+    <key>CFBundleIdentifier</key>      <string>com.odysseus.macos.launcher</string>
+    <key>CFBundleVersion</key>         <string>2.0</string>
+    <key>CFBundleShortVersionString</key><string>2.0</string>
     <key>CFBundlePackageType</key>     <string>APPL</string>
     <key>CFBundleExecutable</key>      <string>$APP_NAME</string>
     <key>CFBundleIconFile</key>        <string>odysseus</string>
@@ -71,7 +73,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 PLIST
 
 # ── Launcher executable (placeholders filled below) ──
-cat > "$APP/Contents/MacOS/$APP_NAME.tmpl" <<'LAUNCHER'
+cat > "$APP/Contents/MacOS/launcher.sh.tmpl" <<'LAUNCHER'
 #!/bin/bash
 # Odysseus.app — start the local server and open the UI in an app window.
 INSTALL_DIR="__INSTALL_DIR__"
@@ -193,10 +195,39 @@ wait "$SERVER_PID" || EXIT_CODE=$?
 echo "$(date): uvicorn exited with code $EXIT_CODE" >> "$LOG"
 LAUNCHER
 
+# ── Generate launcher.sh (shell script with placeholders filled) ──
 sed -e "s|__INSTALL_DIR__|$INSTALL_DIR|g" -e "s|__PORT__|$PORT|g" \
-    "$APP/Contents/MacOS/$APP_NAME.tmpl" > "$APP/Contents/MacOS/$APP_NAME"
-rm -f "$APP/Contents/MacOS/$APP_NAME.tmpl"
-chmod +x "$APP/Contents/MacOS/$APP_NAME"
+    "$APP/Contents/MacOS/launcher.sh.tmpl" > "$APP/Contents/MacOS/launcher.sh"
+rm -f "$APP/Contents/MacOS/launcher.sh.tmpl"
+chmod +x "$APP/Contents/MacOS/launcher.sh"
+
+# ── Compile C trampoline executable ──
+# The CFBundleExecutable must be a Mach-O binary — macOS opens shell scripts
+# in Script Editor instead of running them. This tiny program delegates to
+# launcher.sh which lives alongside it in Contents/MacOS/.
+cat > "$APP/Contents/MacOS/trampoline.c" <<'CTRAMP'
+#include <stdio.h>
+#include <unistd.h>
+#include <string.h>
+#include <libgen.h>
+
+int main(int argc, char *argv[]) {
+    char path[4096];
+    strncpy(path, argv[0], sizeof(path) - 20);
+    path[sizeof(path) - 20] = '\0';
+    char *dir = dirname(path);
+    char script[4096];
+    snprintf(script, sizeof(script), "%s/launcher.sh", dir);
+    execl("/bin/bash", "bash", script, NULL);
+    return 1;  /* Only reached if execl fails. */
+}
+CTRAMP
+
+clang -O2 -o "$APP/Contents/MacOS/$APP_NAME" \
+      "$APP/Contents/MacOS/trampoline.c" \
+      -Wall -Werror
+rm -f "$APP/Contents/MacOS/trampoline.c"
+echo "  executable:  $APP_NAME (compiled Mach-O trampoline)"
 
 # Refresh Finder's icon cache for the new bundle.
 touch "$APP"
