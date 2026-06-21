@@ -2,6 +2,26 @@
 // Odysseus UI — Main Application Orchestrator
 // ES6 module — entry point, no exports (wires all modules together)
 // ============================================
+//
+// ── Adding a new tool modal? Touch these 7 places ──
+// 1. static/index.html        — modal markup (.modal.hidden) + sidebar btn
+//                                + rail btn + <script> tag for panel JS
+// 2. static/app.js            — _railToolMap entry, click handler,
+//                                UI_VIS_MAP entry; expose globals
+//                                (window._Modals, window._makeWindowDraggable)
+//                                if panel is a standalone script
+// 3. static/style.css         — add #your-modal to the centered-modals
+//                                @media list (~line 5004)
+// 4. static/js/modalManager.js — _AUTO_WIRE map entry + optionally
+//                                _SWIPE_DOWN_MINIMIZES for mobile
+// 5. static/lib/              — vendor any CDN deps (CSP: script-src has
+//                                cdn.jsdelivr.net but style-src/connect-src
+//                                are 'self' only)
+// 6. static/js/<panel>.js     — panel logic; use window._Modals /
+//                                window._makeWindowDraggable if standalone
+// 7. Rebuild: npm run build:js && npx postcss static/style.css
+//    -o static/style.min.css --no-map
+//
 import Storage from './js/storage.js';
 import uiModule from './js/ui.js';
 import workspaceModule from './js/workspace.js';
