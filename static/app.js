@@ -835,6 +835,16 @@ function initializeEventListeners() {
     });
   }
 
+  // ── Terminal modal toggle ──
+  const toolTerminalBtn = el('tool-terminal-btn');
+  if (toolTerminalBtn) {
+    toolTerminalBtn.addEventListener('click', () => {
+      if (window.terminalManager) {
+        window.terminalManager.open();
+      }
+    });
+  }
+
   // ── Cookbook modal toggle ──
   const toolCookbookBtn = el('tool-cookbook-btn');
   if (toolCookbookBtn) {
@@ -2413,6 +2423,7 @@ function initializeEventListeners() {
     'doc-toggle-btn':      '#overflow-doc-btn',
     'rag-toggle-btn':      '#overflow-rag-btn',
     'bash-toggle-btn':     '#bash-toggle-btn',
+    'tool-terminal':       '#tool-terminal-btn',
     'overflow-plus-btn':   '.overflow-wrapper',
     'mode-toggle':         '.mode-toggle',
     'preset-mini-btn':     '#overflow-preset-btn',
@@ -3422,6 +3433,7 @@ function startOdysseusApp() {
     'rail-memory':    'tool-memory-btn',
     'rail-theme':     'tool-theme-btn',
     'rail-email':     'email-section-title',
+    'rail-terminal':  'tool-terminal-btn',
   };
   Object.entries(_railToolMap).forEach(([railId, toolId]) => {
     const railBtn = el(railId);

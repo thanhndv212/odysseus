@@ -8,6 +8,7 @@ import os
 import re
 import shlex
 import shutil
+import struct
 import subprocess
 import uuid
 import tempfile
@@ -18,17 +19,18 @@ from core.platform_compat import IS_APPLE_SILICON, which_tool
 from core.middleware import INTERNAL_TOOL_USER
 from src.optional_deps import prepare_optional_dependency_import
 
-# POSIX-only: `pty`/`fcntl` transitively import `termios`, which does NOT exist
-# on Windows, so importing them unconditionally crashed app startup there
-# (ModuleNotFoundError: termios — issues #140/#92/#63/#149/#150). The PTY code
-# path is only reachable on POSIX; Windows uses pipe streaming + a detached-job
-# fallback for the tmux feature (see _generate_win_detached).
+# POSIX-only: `pty`/`fcntl`/`termios` do NOT exist on Windows, so importing
+# them unconditionally crashed app startup there (ModuleNotFoundError).
+# The PTY code path is only reachable on POSIX; Windows uses pipe streaming +
+# a detached-job fallback.
 try:
     import fcntl
     import pty
+    import termios
 except ImportError as exc:
     fcntl = None
     pty = None
+    termios = None
     _PTY_IMPORT_ERROR = exc
 else:
     _PTY_IMPORT_ERROR = None
@@ -404,6 +406,21 @@ class ShellExecRequest(BaseModel):
     use_tmux: bool = False  # run in tmux session (survives browser disconnect)
 
 
+class PtyInputRequest(BaseModel):
+    session_id: str
+    input: str  # raw bytes to write to PTY stdin
+
+
+class PtyResizeRequest(BaseModel):
+    session_id: str
+    cols: int
+    rows: int
+
+
+# PTY session store for interactive terminal sessions
+_pty_sessions: dict[str, dict] = {}  # session_id -> {master_fd, proc, created_at}
+
+
 async def _create_shell(command: str, **kwargs):
     """Spawn a shell subprocess for `command`."""
     return await asyncio.create_subprocess_shell(command, **kwargs)
@@ -694,6 +711,161 @@ async def _generate_tmux(cmd: str, request: Request):
         log_path.unlink(missing_ok=True)
     except Exception:
         pass
+
+
+async def _pty_send_input(session_id: str, data: str) -> bool:
+    """Write data to an active PTY session's stdin. Returns True on success."""
+    session = _pty_sessions.get(session_id)
+    if not session:
+        return False
+    try:
+        os.write(session["master_fd"], data.encode())
+        return True
+    except OSError:
+        return False
+
+
+def _pty_apply_resize(session_id: str, cols: int, rows: int) -> bool:
+    """Apply terminal size change to an active PTY session via TIOCSWINSZ."""
+    if termios is None:
+        return False
+    session = _pty_sessions.get(session_id)
+    if not session:
+        return False
+    try:
+        winsize = struct.pack("HHHH", rows, cols, 0, 0)
+        fcntl.ioctl(session["master_fd"], termios.TIOCSWINSZ, winsize)
+        return True
+    except OSError:
+        return False
+
+
+async def _cleanup_pty_session(session_id: str):
+    """Kill process, close fd, and remove session from store."""
+    session = _pty_sessions.pop(session_id, None)
+    if not session:
+        return
+    proc = session.get("proc")
+    if proc and proc.returncode is None:
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+    try:
+        os.close(session["master_fd"])
+    except OSError:
+        pass
+
+
+async def _generate_interactive_pty(
+    cmd: str, cols: int, rows: int, request: Request
+):
+    """Start an interactive PTY session for the terminal panel.
+    Streams output via SSE, accepts input via /api/shell/pty/input,
+    and supports resize via /api/shell/pty/resize."""
+    if not PTY_SUPPORTED:
+        msg = "PTY streaming is not supported on this platform"
+        if _PTY_IMPORT_ERROR:
+            msg += f": {_PTY_IMPORT_ERROR}"
+        yield f"data: {json.dumps({'type': 'error', 'message': msg})}\n\n"
+        return
+
+    loop = asyncio.get_running_loop()
+    master_fd, slave_fd = pty.openpty()
+
+    # Set master to non-blocking
+    flags = fcntl.fcntl(master_fd, fcntl.F_GETFL)
+    fcntl.fcntl(master_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+
+    # Set initial terminal size
+    winsize = struct.pack("HHHH", rows, cols, 0, 0)
+    fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, winsize)
+
+    proc = await asyncio.create_subprocess_shell(
+        cmd,
+        stdin=slave_fd,
+        stdout=slave_fd,
+        stderr=slave_fd,
+        cwd=str(Path.home()),
+        preexec_fn=os.setsid,
+    )
+    os.close(slave_fd)  # parent doesn't need the slave side
+
+    session_id = uuid.uuid4().hex[:12]
+
+    _pty_sessions[session_id] = {
+        "master_fd": master_fd,
+        "proc": proc,
+        "created_at": loop.time(),
+    }
+
+    # Emit session_id so client knows where to send input/resize
+    yield f"data: {json.dumps({'type': 'session', 'session_id': session_id})}\n\n"
+
+    process_done = asyncio.Event()
+
+    async def _wait_proc():
+        await proc.wait()
+        process_done.set()
+
+    wait_task = asyncio.create_task(_wait_proc())
+
+    try:
+        while not process_done.is_set():
+            # Check client disconnect
+            if await request.is_disconnected():
+                await _cleanup_pty_session(session_id)
+                return
+
+            # Read available data from PTY
+            try:
+                chunk = await asyncio.wait_for(
+                    loop.run_in_executor(None, _pty_read, master_fd),
+                    timeout=2.0,
+                )
+            except asyncio.TimeoutError:
+                continue
+            except OSError:
+                break
+
+            if chunk is None:
+                # No data yet, keep waiting
+                continue
+            if chunk == b"":
+                # EOF — process closed the PTY
+                break
+
+            text = chunk.decode(errors="replace")
+            yield f"data: {json.dumps({'type': 'output', 'data': text})}\n\n"
+
+        # Drain any remaining PTY output after process exits
+        try:
+            while True:
+                rest = _pty_read(master_fd)
+                if rest is None or rest == b"":
+                    break
+                text = rest.decode(errors="replace")
+                yield f"data: {json.dumps({'type': 'output', 'data': text})}\n\n"
+        except OSError:
+            pass
+
+        await wait_task
+        yield f"data: {json.dumps({'type': 'exit', 'code': proc.returncode})}\n\n"
+
+    except Exception as e:
+        try:
+            proc.kill()
+            await proc.wait()
+        except ProcessLookupError:
+            pass
+        yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+    finally:
+        wait_task.cancel()
+        try:
+            os.close(master_fd)
+        except OSError:
+            pass
+        _pty_sessions.pop(session_id, None)
 
 
 def setup_shell_routes() -> APIRouter:
@@ -1205,5 +1377,46 @@ def setup_shell_routes() -> APIRouter:
         if proc.returncode == 0:
             return {"ok": True, "output": out.decode("utf-8", errors="replace")[-400:]}
         return {"ok": False, "error": err.decode("utf-8", errors="replace")[-400:]}
+
+    # ── Interactive PTY terminal endpoints ──
+
+    @router.get("/api/shell/pty/start")
+    async def pty_start(
+        request: Request,
+        cmd: str = "bash",
+        cols: int = 80,
+        rows: int = 24,
+    ):
+        """Start an interactive PTY session and stream output via SSE.
+        Returns a session_id in the first event; use /api/shell/pty/input
+        and /api/shell/pty/resize to interact with the terminal."""
+        _require_admin(request)
+        if not cmd.strip():
+            cmd = "bash"
+        logger.info(
+            "Interactive PTY start: cmd=%s cols=%d rows=%d", cmd, cols, rows
+        )
+        return StreamingResponse(
+            _generate_interactive_pty(cmd, cols, rows, request),
+            media_type="text/event-stream",
+        )
+
+    @router.post("/api/shell/pty/input")
+    async def pty_input(request: Request, req: PtyInputRequest):
+        """Feed input to an active interactive PTY session."""
+        _require_admin(request)
+        ok = await _pty_send_input(req.session_id, req.input)
+        if not ok:
+            raise HTTPException(404, "PTY session not found or closed")
+        return {"ok": True}
+
+    @router.post("/api/shell/pty/resize")
+    async def pty_resize(request: Request, req: PtyResizeRequest):
+        """Resize an active interactive PTY session."""
+        _require_admin(request)
+        ok = _pty_apply_resize(req.session_id, req.cols, req.rows)
+        if not ok:
+            raise HTTPException(404, "PTY session not found or resize failed")
+        return {"ok": True}
 
     return router

@@ -5010,6 +5010,7 @@ body.bg-pattern-sparkles {
       #research-overlay,
       #theme-modal,
       #settings-modal,
+      #terminal-modal,
       #email-lib-modal {
         left: calc(var(--icon-rail-w, 48px) + var(--sidebar-w, 0px));
         width: calc(100% - (var(--icon-rail-w, 48px) + var(--sidebar-w, 0px)));
