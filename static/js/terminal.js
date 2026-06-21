@@ -2,26 +2,75 @@
 (function() {
     'use strict';
 
+    const MODAL_ID = 'terminal-modal';
+    const Modals = () => window._Modals;
+
     let term = null;          // Terminal instance
     let fitAddon = null;      // FitAddon instance
     let eventSource = null;   // SSE EventSource
     let sessionId = null;     // Backend PTY session ID
     let modal = null;
-    let isMinimized = false;
+    let _resizeObserver = null;
 
     function open() {
         if (term) {
-            if (modal) modal.classList.remove('hidden');
-            isMinimized = false;
+            // Already open — restore if minimized
+            if (Modals() && Modals().isMinimized(MODAL_ID)) {
+                Modals().restore(MODAL_ID);
+            } else if (modal) {
+                modal.classList.remove('hidden');
+            }
             if (fitAddon) { setTimeout(() => fitAddon.fit(), 50); }
             term.focus();
             return;
         }
 
-        modal = document.getElementById('terminal-modal');
+        modal = document.getElementById(MODAL_ID);
         const container = document.getElementById('terminal-container');
         if (!modal || !container) return;
+
+        // Register with modalManager for minimize/dock/drag lifecycle
+        if (Modals()) {
+            if (Modals().isMinimized(MODAL_ID)) {
+                Modals().restore(MODAL_ID);
+                if (fitAddon) { setTimeout(() => fitAddon.fit(), 50); }
+                term.focus();
+                return;
+            }
+
+            Modals().register(MODAL_ID, {
+                railBtnId: 'rail-terminal',
+                sidebarBtnId: 'tool-terminal-btn',
+                closeFn: () => _doClose(),
+                restoreFn: () => {
+                    if (fitAddon) { setTimeout(() => fitAddon.fit(), 50); }
+                    if (term) term.focus();
+                },
+            });
+
+            // Inject minimize button (modalManager handles this)
+            Modals().injectMinimizeButton(modal, MODAL_ID);
+        }
+
+        // Show the modal
         modal.classList.remove('hidden');
+
+        // Wire drag via windowDrag module
+        const content = modal.querySelector('.modal-content');
+        const header = content ? content.querySelector('.modal-header') : null;
+        if (window._makeWindowDraggable && content && header) {
+            window._makeWindowDraggable(modal, { content, header });
+        }
+
+        // Wire close button via modalManager
+        const closeBtn = document.getElementById('terminal-close-btn');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (Modals()) Modals().close(MODAL_ID);
+                else _doClose();
+            });
+        }
 
         // 1. Create xterm
         if (typeof Terminal === 'undefined') {
@@ -90,22 +139,12 @@
             }).catch(() => {});
         });
 
-        // 6. Wire minimize / close buttons
-        const minimizeBtn = document.getElementById('terminal-minimize-btn');
-        if (minimizeBtn) {
-            minimizeBtn.addEventListener('click', (e) => { e.stopPropagation(); minimize(); });
-        }
-        const closeBtn = document.getElementById('terminal-close-btn');
-        if (closeBtn) {
-            closeBtn.addEventListener('click', (e) => { e.stopPropagation(); close(); });
-        }
-
-        // 7. Window resize → refit
+        // 6. Window resize → refit
         window.addEventListener('resize', _onWindowResize);
 
-        // 8. Container resize (user drags modal corner) → refit
+        // 7. Container resize (modal resize handle) → refit
         if (typeof ResizeObserver !== 'undefined') {
-            const _resizeObserver = new ResizeObserver(() => {
+            _resizeObserver = new ResizeObserver(() => {
                 if (fitAddon && modal && !modal.classList.contains('hidden')) {
                     fitAddon.fit();
                 }
@@ -113,12 +152,10 @@
             _resizeObserver.observe(container);
         }
 
-        // 9. Click to reconnect if connection lost
+        // 8. Click to reconnect if connection lost
         container.addEventListener('click', () => {
             if (!eventSource || eventSource.readyState === EventSource.CLOSED) {
-                if (term) {
-                    term.write('\r\n\x1b[33mReconnecting...\x1b[0m\r\n');
-                }
+                if (term) term.write('\r\n\x1b[33mReconnecting...\x1b[0m\r\n');
                 connectSSE();
                 if (term) term.focus();
             }
@@ -134,11 +171,7 @@
     }
 
     function connectSSE() {
-        // Kill any existing connection
-        if (eventSource) {
-            eventSource.close();
-            eventSource = null;
-        }
+        if (eventSource) { eventSource.close(); eventSource = null; }
         sessionId = null;
 
         const cols = term ? term.cols : 80;
@@ -160,7 +193,6 @@
                     if (term) term.write('\r\n\x1b[31m[Error: ' + msg.message + ']\x1b[0m\r\n');
                 }
             } catch (err) {
-                // Non-JSON data — write raw to terminal
                 if (term) term.write(e.data);
             }
         });
@@ -175,28 +207,42 @@
         });
     }
 
-    function close() {
+    function _doClose() {
         if (eventSource) { eventSource.close(); eventSource = null; }
         sessionId = null;
+        if (_resizeObserver) { _resizeObserver.disconnect(); _resizeObserver = null; }
         if (term) {
             term.dispose();
             term = null;
             fitAddon = null;
         }
         if (modal) modal.classList.add('hidden');
-        isMinimized = false;
         window.removeEventListener('resize', _onWindowResize);
     }
 
+    function close() {
+        if (Modals() && Modals().isRegistered(MODAL_ID)) {
+            Modals().close(MODAL_ID);
+        } else {
+            _doClose();
+        }
+    }
+
     function minimize() {
-        if (modal) modal.classList.add('hidden');
-        isMinimized = true;
+        if (Modals() && Modals().isRegistered(MODAL_ID)) {
+            Modals().minimize(MODAL_ID);
+        } else if (modal) {
+            modal.classList.add('hidden');
+        }
         // Keep SSE + xterm alive so state is preserved
     }
 
     function restore() {
-        if (modal) modal.classList.remove('hidden');
-        isMinimized = false;
+        if (Modals() && Modals().isMinimized(MODAL_ID)) {
+            Modals().restore(MODAL_ID);
+        } else if (modal) {
+            modal.classList.remove('hidden');
+        }
         if (fitAddon) { setTimeout(() => fitAddon.fit(), 50); }
         if (term) term.focus();
     }
@@ -211,7 +257,7 @@
 
     window.terminalManager = { open, close, minimize, restore, focus, isOpen };
 
-    // Self-wire: attach click handlers directly
+    // Self-wire click handlers
     function _wireButtons() {
         const sidebarBtn = document.getElementById('tool-terminal-btn');
         if (sidebarBtn) {

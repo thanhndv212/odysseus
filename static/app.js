@@ -15,6 +15,8 @@ import compareModule from './js/compare/index.js';
 import documentModule from './js/document.js';
 import searchChatModule from './js/search-chat.js';
 import { makeWindowDraggable } from './js/windowDrag.js';
+// Expose for standalone scripts (terminal.js) that can't use ES imports
+window._makeWindowDraggable = makeWindowDraggable;
 import markdownModule from './js/markdown.js';
 import chatRenderer from './js/chatRenderer.js';
 import sessionModule from './js/sessions.js';
@@ -29,7 +31,8 @@ import adminModule from './js/admin.js';
 import settingsModule from './js/settings.js';
 import { ensureHljs } from './js/hljsLoader.js';
 // Eagerly bind unified minimize/restore behavior across all tool modals.
-import './js/modalManager.js';
+import * as _mm from './js/modalManager.js';
+window._Modals = _mm;
 // Desktop window tiling — drag a modal near an edge/corner to snap.
 import './js/tileManager.js';
 import themeModule from './js/theme.js';
