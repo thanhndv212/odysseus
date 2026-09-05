@@ -4,6 +4,8 @@ memory-to-notes — Convert memory.json entries into Obsidian .md notes with wik
 
 Incremental by default: only processes entries added since the last run.
 Use --full to force a complete rebuild.
+Use --digest to roll up entries since the last digest into a short
+'## Recent Activity' bullet per project note, instead of appending raw facts.
 Use --json-events to emit NDJSON progress events on stdout (for SSE streaming).
 """
 
@@ -13,7 +15,7 @@ import re
 import sys
 import time
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # ── Configuration ──────────────────────────────────────────────────────────────
@@ -25,7 +27,10 @@ _REAL_HOME = _ODYSSEUS_DIR.parent.parent            # …/ (actual /Users/<you>)
 MEMORY_PATH = _ODYSSEUS_DIR / "data" / "memory.json"
 VAULT_PATH = _REAL_HOME / "Develop" / "obsidian-ws" / "Documents" / "Obsidian Vault"
 PROJECTS_DIR = VAULT_PATH / "Projects"
-TRACKING_FILE = _SCRIPT_DIR / ".memory_to_notes_tracking.json" 
+TRACKING_FILE = _SCRIPT_DIR / ".memory_to_notes_tracking.json"
+DIGEST_TRACKING_FILE = _SCRIPT_DIR / ".digest_tracking.json"
+DIGEST_MAX_BULLETS = 6              # keep only the last N digest rollups per project note
+DIGEST_DEFAULT_LOOKBACK_DAYS = 7    # window used on the very first digest run
 
 # Project detection: keyword regex patterns → project slug + name
 PROJECT_PATTERNS = {
@@ -236,6 +241,19 @@ def save_tracking(state):
     """Persist the tracking state."""
     os.makedirs(os.path.dirname(TRACKING_FILE), exist_ok=True)
     with open(TRACKING_FILE, "w") as f:
+        json.dump(state, f, indent=2)
+
+
+def load_digest_tracking():
+    """Load the digest tracking state {last_digest_ts: ...}."""
+    if os.path.exists(DIGEST_TRACKING_FILE):
+        with open(DIGEST_TRACKING_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+
+def save_digest_tracking(state):
+    with open(DIGEST_TRACKING_FILE, "w") as f:
         json.dump(state, f, indent=2)
 
 
@@ -459,6 +477,107 @@ def find_related_projects(slug, cat_map, max_related=5):
     return related
 
 
+def summarize_digest(cat_map):
+    """Rule-based one-line rollup: counts by category + which dirs were touched.
+
+    No LLM call — just a readable roll-up of what the raw fact log already
+    contains. Good enough to answer "what happened here recently" at a glance.
+    """
+    parts = [
+        f"{len(entries)} {cat}{'s' if len(entries) != 1 else ''}"
+        for cat, entries in sorted(cat_map.items())
+    ]
+    dirs = sorted({
+        entry["directory"].rstrip("/").split("/")[-1]
+        for entries in cat_map.values()
+        for entry in entries
+        if entry.get("directory")
+    })
+    line = ", ".join(parts)
+    if dirs:
+        shown = ", ".join(dirs[:6])
+        line += f" — touched: {shown}"
+        if len(dirs) > 6:
+            line += f", +{len(dirs) - 6} more"
+    return line
+
+
+def write_digest(note_path, since_dt, cat_map):
+    """Insert/refresh the '## Recent Activity' rollup at the top of a project note.
+
+    Keeps only the last DIGEST_MAX_BULLETS dated bullets so the section stays
+    a quick skim, while the full per-entry fact log (written by
+    write_new_note/append_to_note) stays untouched further down the file.
+    Returns False if the project has no note yet (nothing to prepend to).
+    """
+    if not os.path.exists(note_path):
+        return False
+
+    with open(note_path, "r") as f:
+        content = f.read()
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    since_str = since_dt.strftime("%Y-%m-%d")
+    new_bullet = f"- **{today}** (since {since_str}): {summarize_digest(cat_map)}"
+
+    heading = "## Recent Activity"
+    start = content.find(heading)
+
+    if start == -1:
+        h1 = re.search(r"^# .+$", content, re.MULTILINE)
+        insert_at = h1.end() + 1 if h1 else len(content)
+        section = f"\n{heading}\n{new_bullet}\n"
+        content = content[:insert_at] + section + content[insert_at:]
+    else:
+        line_end = content.index("\n", start) + 1
+        rest = content[line_end:]
+        next_heading = re.search(r"^## ", rest, re.MULTILINE)
+        block_end = line_end + (next_heading.start() if next_heading else len(rest))
+        existing_bullets = [l for l in content[line_end:block_end].splitlines() if l.strip()]
+        bullets = [new_bullet] + existing_bullets[:DIGEST_MAX_BULLETS - 1]
+        content = content[:line_end] + "\n".join(bullets) + "\n\n" + content[block_end:]
+
+    with open(note_path, "w") as f:
+        f.write(content)
+    return True
+
+
+def run_digest(all_entries):
+    """Roll up entries since the last digest run into a '## Recent Activity'
+    bullet per affected project note. Independent of the incremental
+    fact-append tracking — safe to run on any cadence (manual, weekly cron)."""
+    tracking = load_digest_tracking()
+    last_ts = tracking.get("last_digest_ts")
+    since_dt = (
+        datetime.fromisoformat(last_ts) if last_ts
+        else datetime.now(timezone.utc) - timedelta(days=DIGEST_DEFAULT_LOOKBACK_DAYS)
+    )
+
+    entries_since = [e for e in all_entries if extract_date(e) > since_dt]
+    if not entries_since:
+        log("phase", {"message": f"No new entries since last digest ({since_dt.date()})."})
+        log("done", {})
+        return
+
+    grouped = defaultdict(lambda: defaultdict(list))
+    for entry in entries_since:
+        for slug in detect_entry_projects(entry):
+            grouped[slug][entry.get("category", "other")].append(entry)
+
+    updated = 0
+    for slug, cat_map in sorted(grouped.items()):
+        note_path = os.path.join(PROJECTS_DIR, slug, f"{slug}.md")
+        if write_digest(note_path, since_dt, cat_map):
+            updated += 1
+            log("project_written", {"project": slug, "action": "digest"})
+        else:
+            log("entry_skipped", {"entry_id": slug, "reason": "no note file yet — run without --digest first"})
+
+    save_digest_tracking({"last_digest_ts": datetime.now(timezone.utc).isoformat()})
+    log("summary", {"new_entries": len(entries_since), "projects_updated": updated})
+    log("done", {})
+
+
 def write_projects_index(updated_slugs=None):
     """Write or update the projects-index.md file in the vault root."""
     index_path = os.path.join(VAULT_PATH, "projects-index.md")
@@ -538,6 +657,7 @@ def main():
     full_rebuild = "--full" in sys.argv
     dry_run = "--dry-run" in sys.argv
     status_only = "--status" in sys.argv
+    digest_mode = "--digest" in sys.argv
 
     if status_only:
         print(json.dumps(get_status(), indent=2))
@@ -546,6 +666,10 @@ def main():
     log("phase", {"message": f"Loading memory.json..."})
     all_entries = load_memory()
     log("phase", {"message": f"Total entries in memory: {len(all_entries)}"})
+
+    if digest_mode:
+        run_digest(all_entries)
+        return
 
     tracking = load_tracking()
     last_id = tracking.get("last_entry_id")
@@ -607,6 +731,7 @@ def main():
         print(f"\n💡 Next run: `python3 {__file__}`  (incremental)")
         print(f"   Full rebuild: `python3 {__file__} --full`")
         print(f"   Dry run:      `python3 {__file__} --dry-run`")
+        print(f"   Digest:       `python3 {__file__} --digest`")
 
 
 if __name__ == "__main__":
